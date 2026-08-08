@@ -9,6 +9,7 @@ import '../features/date/blind_date_screen.dart';
 import '../features/vail_request/active_users_screen.dart';
 import '../features/vail_request/send_vail_request_screen.dart';
 import '../features/vail_request/incoming_vail_requests_screen.dart';
+import '../features/profile/profile_screen.dart';
 
 final appRouter = GoRouter(
   initialLocation: '/sign-in',
@@ -54,6 +55,11 @@ final appRouter = GoRouter(
     GoRoute(
       path: '/vail-requests',
       builder: (context, state) => const IncomingVailRequestsScreen(),
+    ),
+    // ── Profile ──────────────────────────────────────────────────────────────
+    GoRoute(
+      path: '/profile',
+      builder: (context, state) => const ProfileScreen(),
     ),
   ],
 );

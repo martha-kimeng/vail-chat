@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/theme.dart';
 import '../vail_request/vail_request_models.dart';
+import '../profile/user_profile.dart';
 
 // ─── Mock data ────────────────────────────────────────────────────────────────
 class _Conversation {
@@ -181,22 +183,29 @@ class _HomeHeader extends StatelessWidget {
                 ],
               ),
               const Spacer(),
-              // Avatar
+              // Avatar — taps to profile
               GestureDetector(
-                onTap: () {},
+                onTap: () => context.push('/profile'),
                 child: Container(
                   width: 40,
                   height: 40,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    gradient: const LinearGradient(
-                      colors: [VailColors.rose, VailColors.roseDark],
+                    border: Border.all(
+                      color: VailColors.rose.withOpacity(0.4),
+                      width: 2,
                     ),
+                    color: VailColors.roseSoft,
                   ),
-                  child: const Icon(
-                    Icons.person_outline_rounded,
-                    color: Colors.white,
-                    size: 22,
+                  clipBehavior: Clip.antiAlias,
+                  child: SvgPicture.network(
+                    currentUser.avatarUrl,
+                    fit: BoxFit.cover,
+                    placeholderBuilder: (_) => const Icon(
+                      Icons.person_outline_rounded,
+                      color: VailColors.rose,
+                      size: 22,
+                    ),
                   ),
                 ),
               ),

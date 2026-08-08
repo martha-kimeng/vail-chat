@@ -14,6 +14,7 @@ class VailField extends StatelessWidget {
     this.suffixIcon,
     this.keyboardType,
     this.validator,
+    this.onChanged,
   });
 
   final TextEditingController controller;
@@ -24,6 +25,7 @@ class VailField extends StatelessWidget {
   final Widget? suffixIcon;
   final TextInputType? keyboardType;
   final String? Function(String?)? validator;
+  final ValueChanged<String>? onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -45,6 +47,7 @@ class VailField extends StatelessWidget {
           obscureText: obscure,
           keyboardType: keyboardType,
           validator: validator,
+          onChanged: onChanged,
           style: GoogleFonts.inter(fontSize: 15, color: VailColors.ink),
           decoration: InputDecoration(
             hintText: hint,
