@@ -3,6 +3,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/theme.dart';
+import '../vail_request/vail_request_models.dart';
 
 // ─── Mock data ────────────────────────────────────────────────────────────────
 class _Conversation {
@@ -84,6 +85,12 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _tabIndex = 0;
 
+  // Count of pending incoming Vail Requests — in a real app this would come
+  // from a stream. Here we derive it from the shared mock list.
+  int get _pendingVailCount => mockIncomingRequests
+      .where((r) => r.status == VailRequestStatus.pending)
+      .length;
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -93,27 +100,38 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             _HomeHeader(
               tabIndex: _tabIndex,
+              pendingVailCount: _pendingVailCount,
               onTabChanged: (i) => setState(() => _tabIndex = i),
             ),
             Expanded(
               child: _tabIndex == 0
                   ? _ConversationList(conversations: _mockConversations)
-                  : const _MatchesTab(),
+                  : _tabIndex == 1
+                  ? const _MatchesTab()
+                  : const _VailRequestsTab(),
             ),
           ],
         ),
       ),
       floatingActionButton: _tabIndex == 0
-          ? FloatingActionButton(
-              onPressed: () {},
+          ? FloatingActionButton.extended(
+              onPressed: () => context.push('/active-users'),
               backgroundColor: VailColors.rose,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
               ),
-              child: const Icon(
-                Icons.add_comment_outlined,
+              icon: const Icon(
+                Icons.favorite_border_rounded,
                 color: Colors.white,
-                size: 22,
+                size: 20,
+              ),
+              label: Text(
+                'New Chat',
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
+                ),
               ),
             )
           : null,
@@ -123,9 +141,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
 // ─── Header + tab bar ─────────────────────────────────────────────────────────
 class _HomeHeader extends StatelessWidget {
-  const _HomeHeader({required this.tabIndex, required this.onTabChanged});
+  const _HomeHeader({
+    required this.tabIndex,
+    required this.onTabChanged,
+    required this.pendingVailCount,
+  });
   final int tabIndex;
   final ValueChanged<int> onTabChanged;
+  final int pendingVailCount;
 
   @override
   Widget build(BuildContext context) {
@@ -194,6 +217,13 @@ class _HomeHeader extends StatelessWidget {
                 active: tabIndex == 1,
                 onTap: () => onTabChanged(1),
               ),
+              const SizedBox(width: 8),
+              _TabPill(
+                label: 'Vail Requests',
+                active: tabIndex == 2,
+                onTap: () => onTabChanged(2),
+                badge: pendingVailCount,
+              ),
             ],
           ),
           const SizedBox(height: 4),
@@ -208,30 +238,57 @@ class _TabPill extends StatelessWidget {
     required this.label,
     required this.active,
     required this.onTap,
+    this.badge = 0,
   });
   final String label;
   final bool active;
   final VoidCallback onTap;
+  final int badge;
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-        decoration: BoxDecoration(
-          color: active ? VailColors.rose : Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Text(
-          label,
-          style: GoogleFonts.inter(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: active ? Colors.white : VailColors.inkLight,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+            decoration: BoxDecoration(
+              color: active ? VailColors.rose : Colors.transparent,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              label,
+              style: GoogleFonts.inter(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: active ? Colors.white : VailColors.inkLight,
+              ),
+            ),
           ),
-        ),
+          if (badge > 0)
+            Positioned(
+              top: -4,
+              right: -4,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  color: active ? Colors.white : VailColors.rose,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '$badge',
+                  style: GoogleFonts.inter(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: active ? VailColors.rose : Colors.white,
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -604,6 +661,227 @@ class _EmptyMatches extends StatelessWidget {
                 height: 1.6,
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Vail Requests tab (summary on home, taps through to full screen) ─────────
+class _VailRequestsTab extends StatelessWidget {
+  const _VailRequestsTab();
+
+  @override
+  Widget build(BuildContext context) {
+    final pending = mockIncomingRequests
+        .where((r) => r.status == VailRequestStatus.pending)
+        .toList();
+
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        // Hero banner
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(22),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [VailColors.rose.withOpacity(0.9), VailColors.roseDark],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.favorite_rounded, color: Colors.white, size: 28),
+              const SizedBox(height: 10),
+              Text(
+                pending.isEmpty
+                    ? 'No pending requests'
+                    : '${pending.length} ${pending.length == 1 ? 'person is' : 'people are'} waiting behind the veil',
+                style: GoogleFonts.playfairDisplay(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                  height: 1.3,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Will you lift it?',
+                style: GoogleFonts.inter(fontSize: 13, color: Colors.white70),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: () => context.push('/vail-requests'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: VailColors.rose,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 10,
+                  ),
+                ),
+                child: Text(
+                  'See all requests',
+                  style: GoogleFonts.inter(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ).animate().fadeIn(duration: 350.ms).slideY(begin: 0.06),
+
+        if (pending.isNotEmpty) ...[
+          const SizedBox(height: 24),
+          Text(
+            'PREVIEW',
+            style: GoogleFonts.inter(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: VailColors.inkLight,
+              letterSpacing: 1.2,
+            ),
+          ),
+          const SizedBox(height: 12),
+          // Show first two as compact cards
+          ...pending.take(2).toList().asMap().entries.map((e) {
+            final req = e.value;
+            return _CompactRequestPreview(request: req)
+                .animate(delay: (e.key * 80).ms)
+                .fadeIn(duration: 300.ms)
+                .slideY(begin: 0.05);
+          }),
+          if (pending.length > 2) ...[
+            const SizedBox(height: 8),
+            Center(
+              child: TextButton(
+                onPressed: () => context.push('/vail-requests'),
+                child: Text(
+                  '+ ${pending.length - 2} more',
+                  style: GoogleFonts.inter(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: VailColors.rose,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ],
+    );
+  }
+}
+
+class _CompactRequestPreview extends StatelessWidget {
+  const _CompactRequestPreview({required this.request});
+  final VailRequest request;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => context.push('/vail-requests'),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: VailColors.ink.withOpacity(0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            // Avatar
+            Container(
+              width: 46,
+              height: 46,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: request.senderAvatarColor.withOpacity(0.14),
+                border: Border.all(
+                  color: request.senderAvatarColor.withOpacity(0.3),
+                  width: 1.5,
+                ),
+              ),
+              child: Center(
+                child: Text(
+                  request.senderAlias[0],
+                  style: GoogleFonts.playfairDisplay(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: request.senderAvatarColor,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    request.senderAlias,
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: VailColors.ink,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    request.insistenceLabel,
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      color: VailColors.inkLight,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            // Hearts indicator
+            Row(
+              children: List.generate(
+                request.heartCount.clamp(1, 5),
+                (_) => const Padding(
+                  padding: EdgeInsets.only(left: 1),
+                  child: Icon(
+                    Icons.favorite_rounded,
+                    color: VailColors.rose,
+                    size: 13,
+                  ),
+                ),
+              ),
+            ),
+            if (request.heartCount > 5) ...[
+              const SizedBox(width: 2),
+              Text(
+                '+${request.heartCount - 5}',
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: VailColors.rose,
+                ),
+              ),
+            ],
           ],
         ),
       ),

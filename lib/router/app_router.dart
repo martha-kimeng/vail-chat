@@ -6,9 +6,12 @@ import '../features/home/home_screen.dart';
 import '../features/chat/chat_screen.dart';
 import '../features/profile/profile_reveal_screen.dart';
 import '../features/date/blind_date_screen.dart';
+import '../features/vail_request/active_users_screen.dart';
+import '../features/vail_request/send_vail_request_screen.dart';
+import '../features/vail_request/incoming_vail_requests_screen.dart';
 
 final appRouter = GoRouter(
-  initialLocation: '/onboarding',
+  initialLocation: '/sign-in',
   routes: [
     GoRoute(
       path: '/onboarding',
@@ -22,10 +25,7 @@ final appRouter = GoRouter(
       path: '/sign-in',
       builder: (context, state) => const SignInScreen(),
     ),
-    GoRoute(
-      path: '/home',
-      builder: (context, state) => const HomeScreen(),
-    ),
+    GoRoute(path: '/home', builder: (context, state) => const HomeScreen()),
     GoRoute(
       path: '/chat/:id',
       builder: (context, state) =>
@@ -40,6 +40,20 @@ final appRouter = GoRouter(
       path: '/date/:id',
       builder: (context, state) =>
           BlindDateScreen(conversationId: state.pathParameters['id']!),
+    ),
+    // ── Vail Request flow ────────────────────────────────────────────────────
+    GoRoute(
+      path: '/active-users',
+      builder: (context, state) => const ActiveUsersScreen(),
+    ),
+    GoRoute(
+      path: '/vail-request/send/:userId',
+      builder: (context, state) =>
+          SendVailRequestScreen(userId: state.pathParameters['userId']!),
+    ),
+    GoRoute(
+      path: '/vail-requests',
+      builder: (context, state) => const IncomingVailRequestsScreen(),
     ),
   ],
 );
