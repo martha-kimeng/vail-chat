@@ -1,0 +1,9 @@
+name: vail_icon_gen
+description: Generates the Vail app icon PNG.
+publish_to: none
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  image: "4.9.1"
