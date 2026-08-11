@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "663146321272",
+    "project_id": "vail-chat",
+    "storage_bucket": "vail-chat.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:663146321272:android:dff8e95523395d09be248d",
+        "android_client_info": {
+          "package_name": "com.vailchat.vail_chat"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCVJ_I1BXzwmXk-qdJbAq1JLy6HRtCx8s4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

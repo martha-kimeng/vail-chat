@@ -7,7 +7,6 @@ plugins {
 android {
     namespace = "com.vailchat.vail_chat"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
