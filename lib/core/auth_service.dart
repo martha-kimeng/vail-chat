@@ -1,4 +1,5 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'presence_service.dart';
 
 /// Thin wrapper around FirebaseAuth — keeps auth logic out of the UI layer.
 class AuthService {
@@ -18,11 +19,17 @@ class AuthService {
   Future<UserCredential> signIn({
     required String email,
     required String password,
-  }) {
-    return _auth.signInWithEmailAndPassword(
+  }) async {
+    final credential = await _auth.signInWithEmailAndPassword(
       email: email.trim(),
       password: password,
     );
+    // Mark the user online in RTDB.
+    final uid = credential.user?.uid;
+    if (uid != null) {
+      await PresenceService.instance.goOnline(uid);
+    }
+    return credential;
   }
 
   /// Create a new account with email and password.
@@ -30,11 +37,17 @@ class AuthService {
   Future<UserCredential> signUp({
     required String email,
     required String password,
-  }) {
-    return _auth.createUserWithEmailAndPassword(
+  }) async {
+    final credential = await _auth.createUserWithEmailAndPassword(
       email: email.trim(),
       password: password,
     );
+    // Mark the new user online in RTDB.
+    final uid = credential.user?.uid;
+    if (uid != null) {
+      await PresenceService.instance.goOnline(uid);
+    }
+    return credential;
   }
 
   /// Send a password-reset email.
@@ -44,7 +57,16 @@ class AuthService {
   }
 
   /// Sign the current user out.
-  Future<void> signOut() => _auth.signOut();
+  ///
+  /// Marks the user offline in RTDB before signing out so their presence
+  /// updates immediately rather than waiting for the RTDB timeout.
+  Future<void> signOut() async {
+    final uid = _auth.currentUser?.uid;
+    if (uid != null) {
+      await PresenceService.instance.goOffline(uid);
+    }
+    await _auth.signOut();
+  }
 
   /// Human-readable message for common [FirebaseAuthException] codes.
   static String messageFor(FirebaseAuthException e) {

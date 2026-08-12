@@ -6,8 +6,8 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../core/auth_service.dart';
 import '../../core/theme.dart';
 import '../../core/user_profile_service.dart';
+import '../../core/vail_request_service.dart';
 import '../profile/user_profile.dart';
-import '../vail_request/vail_request_models.dart';
 
 // ─── Mock data ────────────────────────────────────────────────────────────────
 class _Conversation {
@@ -95,10 +95,14 @@ class _HomeScreenState extends State<HomeScreen> {
   // Live profile stream — keeps the avatar in sync with Firestore.
   UserProfile? _profile;
 
+  // Live pending Vail Request count — drives the tab badge.
+  int _pendingVailCount = 0;
+
   @override
   void initState() {
     super.initState();
     _subscribeToProfile();
+    _subscribeToPendingCount();
   }
 
   void _subscribeToProfile() {
@@ -119,11 +123,18 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // Count of pending incoming Vail Requests — in a real app this would come
-  // from a stream. Here we derive it from the shared mock list.
-  int get _pendingVailCount => mockIncomingRequests
-      .where((r) => r.status == VailRequestStatus.pending)
-      .length;
+  void _subscribeToPendingCount() {
+    try {
+      VailRequestService.instance.pendingCountStream().listen(
+        (count) {
+          if (mounted) setState(() => _pendingVailCount = count);
+        },
+        onError: (_) {
+          /* keep showing 0 on error */
+        },
+      );
+    } catch (_) {}
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -767,121 +778,153 @@ class _VailRequestsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final pending = mockIncomingRequests
-        .where((r) => r.status == VailRequestStatus.pending)
-        .toList();
+    return StreamBuilder<List<VailRequestDoc>>(
+      stream: VailRequestService.instance.incomingRequestsStream(),
+      builder: (context, snapshot) {
+        final pending = (snapshot.data ?? [])
+            .where((r) => r.status == VailRequestStatus.pending)
+            .toList();
 
-    return ListView(
-      padding: const EdgeInsets.all(20),
-      children: [
-        // Hero banner
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(22),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [VailColors.rose.withOpacity(0.9), VailColors.roseDark],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Icon(Icons.favorite_rounded, color: Colors.white, size: 28),
-              const SizedBox(height: 10),
+        return ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            // Hero banner
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(22),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    VailColors.rose.withOpacity(0.9),
+                    VailColors.roseDark,
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(
+                    Icons.favorite_rounded,
+                    color: Colors.white,
+                    size: 28,
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    pending.isEmpty
+                        ? 'No pending requests'
+                        : '${pending.length} ${pending.length == 1 ? 'person is' : 'people are'} waiting behind the veil',
+                    style: GoogleFonts.playfairDisplay(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                      height: 1.3,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Will you lift it?',
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      color: Colors.white70,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: () => context.push('/vail-requests'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: VailColors.rose,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 10,
+                      ),
+                    ),
+                    child: Text(
+                      'See all requests',
+                      style: GoogleFonts.inter(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ).animate().fadeIn(duration: 350.ms).slideY(begin: 0.06),
+
+            if (pending.isNotEmpty) ...[
+              const SizedBox(height: 24),
               Text(
-                pending.isEmpty
-                    ? 'No pending requests'
-                    : '${pending.length} ${pending.length == 1 ? 'person is' : 'people are'} waiting behind the veil',
-                style: GoogleFonts.playfairDisplay(
-                  fontSize: 18,
+                'PREVIEW',
+                style: GoogleFonts.inter(
+                  fontSize: 11,
                   fontWeight: FontWeight.w700,
-                  color: Colors.white,
-                  height: 1.3,
+                  color: VailColors.inkLight,
+                  letterSpacing: 1.2,
                 ),
               ),
-              const SizedBox(height: 6),
-              Text(
-                'Will you lift it?',
-                style: GoogleFonts.inter(fontSize: 13, color: Colors.white70),
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: () => context.push('/vail-requests'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white,
-                  foregroundColor: VailColors.rose,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 10,
-                  ),
-                ),
-                child: Text(
-                  'See all requests',
-                  style: GoogleFonts.inter(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
+              const SizedBox(height: 12),
+              ...pending.take(2).toList().asMap().entries.map((e) {
+                final req = e.value;
+                return _CompactRequestPreview(request: req)
+                    .animate(delay: (e.key * 80).ms)
+                    .fadeIn(duration: 300.ms)
+                    .slideY(begin: 0.05);
+              }),
+              if (pending.length > 2) ...[
+                const SizedBox(height: 8),
+                Center(
+                  child: TextButton(
+                    onPressed: () => context.push('/vail-requests'),
+                    child: Text(
+                      '+ ${pending.length - 2} more',
+                      style: GoogleFonts.inter(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: VailColors.rose,
+                      ),
+                    ),
                   ),
                 ),
-              ),
+              ],
             ],
-          ),
-        ).animate().fadeIn(duration: 350.ms).slideY(begin: 0.06),
-
-        if (pending.isNotEmpty) ...[
-          const SizedBox(height: 24),
-          Text(
-            'PREVIEW',
-            style: GoogleFonts.inter(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: VailColors.inkLight,
-              letterSpacing: 1.2,
-            ),
-          ),
-          const SizedBox(height: 12),
-          // Show first two as compact cards
-          ...pending.take(2).toList().asMap().entries.map((e) {
-            final req = e.value;
-            return _CompactRequestPreview(request: req)
-                .animate(delay: (e.key * 80).ms)
-                .fadeIn(duration: 300.ms)
-                .slideY(begin: 0.05);
-          }),
-          if (pending.length > 2) ...[
-            const SizedBox(height: 8),
-            Center(
-              child: TextButton(
-                onPressed: () => context.push('/vail-requests'),
-                child: Text(
-                  '+ ${pending.length - 2} more',
-                  style: GoogleFonts.inter(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: VailColors.rose,
-                  ),
-                ),
-              ),
-            ),
           ],
-        ],
-      ],
+        );
+      },
     );
   }
 }
 
 class _CompactRequestPreview extends StatelessWidget {
   const _CompactRequestPreview({required this.request});
-  final VailRequest request;
+  final VailRequestDoc request;
+
+  // Derive a stable colour from the sender UID.
+  Color get _senderColor {
+    const palette = [
+      Color(0xFF9B59B6),
+      Color(0xFF4A90D9),
+      Color(0xFF27AE60),
+      Color(0xFFE8516A),
+      Color(0xFF16A085),
+      Color(0xFFE67E22),
+      Color(0xFF2980B9),
+      Color(0xFF7F8C8D),
+    ];
+    final index =
+        request.senderId.codeUnits.fold(0, (a, b) => a + b) % palette.length;
+    return palette[index];
+  }
 
   @override
   Widget build(BuildContext context) {
+    final color = _senderColor;
     return GestureDetector(
       onTap: () => context.push('/vail-requests'),
       child: Container(
@@ -906,11 +949,8 @@ class _CompactRequestPreview extends StatelessWidget {
               height: 46,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: request.senderAvatarColor.withOpacity(0.14),
-                border: Border.all(
-                  color: request.senderAvatarColor.withOpacity(0.3),
-                  width: 1.5,
-                ),
+                color: color.withOpacity(0.14),
+                border: Border.all(color: color.withOpacity(0.3), width: 1.5),
               ),
               child: Center(
                 child: Text(
@@ -918,7 +958,7 @@ class _CompactRequestPreview extends StatelessWidget {
                   style: GoogleFonts.playfairDisplay(
                     fontSize: 18,
                     fontWeight: FontWeight.w700,
-                    color: request.senderAvatarColor,
+                    color: color,
                   ),
                 ),
               ),

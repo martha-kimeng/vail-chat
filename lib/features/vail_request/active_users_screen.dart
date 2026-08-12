@@ -1,13 +1,16 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../core/presence_service.dart';
 import '../../core/theme.dart';
+import '../../core/user_profile_service.dart';
 import 'vail_request_models.dart';
 
 // ─── Active Users Screen ──────────────────────────────────────────────────────
-// Shows who is currently online / reachable. The user can filter by gender,
-// age group and location, then tap any card to send a Vail Request.
+// Queries the `users` Firestore collection (excluding self) and overlays live
+// online status from RTDB presence.
 
 class ActiveUsersScreen extends StatefulWidget {
   const ActiveUsersScreen({super.key});
@@ -24,6 +27,12 @@ class _ActiveUsersScreenState extends State<ActiveUsersScreen> {
   bool _onlineOnly = true;
   final _searchCtrl = TextEditingController();
 
+  // ── live data ─────────────────────────────────────────────────────────────
+  List<ActiveUser> _allUsers = [];
+  Set<String> _onlineUids = {};
+  bool _loading = true;
+  String? _error;
+
   static const _locations = [
     'Any',
     'Cape Town',
@@ -35,17 +44,144 @@ class _ActiveUsersScreenState extends State<ActiveUsersScreen> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    _loadUsers();
+    _subscribePresence();
+  }
+
+  // ── data loading ──────────────────────────────────────────────────────────
+
+  Future<void> _loadUsers() async {
+    try {
+      final currentUid = UserProfileService.instance.currentUid;
+      final snap = await FirebaseFirestore.instance.collection('users').get();
+
+      final users = snap.docs
+          .where((doc) => doc.id != currentUid)
+          .map(_docToActiveUser)
+          .toList();
+
+      if (mounted) {
+        setState(() {
+          _allUsers = users;
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = 'Could not load users. Please try again.';
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  void _subscribePresence() {
+    PresenceService.instance.onlineUidsStream().listen(
+      (uids) {
+        if (mounted) setState(() => _onlineUids = uids);
+      },
+      onError: (_) {
+        /* silently ignore — online dots just won't update */
+      },
+    );
+  }
+
+  // ── map Firestore doc → ActiveUser ────────────────────────────────────────
+
+  ActiveUser _docToActiveUser(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final d = doc.data()!;
+    final gender = _parseGender(d['gender'] as String?);
+    final ageGroup = _parseAgeGroup(d['age'] as int?);
+    // Derive a stable avatar colour from the UID so every user has a distinct
+    // colour without storing one explicitly.
+    final color = _colorFromUid(doc.id);
+
+    return ActiveUser(
+      id: doc.id,
+      alias: (d['nickname'] as String?) ?? 'Stranger',
+      gender: gender,
+      ageGroup: ageGroup,
+      location: (d['town'] as String?) ?? '',
+      avatarColor: color,
+      // isOnline is wired to RTDB via _onlineUids — re-evaluated on every
+      // setState triggered by the presence stream.
+      isOnline: _onlineUids.contains(doc.id),
+      bio: _buildBio(d),
+    );
+  }
+
+  String _buildBio(Map<String, dynamic> d) {
+    final parts = <String>[];
+    final occupation = d['occupation'] as String?;
+    final hobbies = d['hobbies'] as String?;
+    if (occupation != null && occupation.isNotEmpty) parts.add(occupation);
+    if (hobbies != null && hobbies.isNotEmpty) parts.add(hobbies);
+    return parts.join(' · ');
+  }
+
+  Gender _parseGender(String? g) => switch (g) {
+    'Man' => Gender.male,
+    'Woman' => Gender.female,
+    'Non-binary' => Gender.nonBinary,
+    _ => Gender.any,
+  };
+
+  AgeGroup _parseAgeGroup(int? age) {
+    if (age == null) return AgeGroup.any;
+    if (age < 20) return AgeGroup.teens;
+    if (age < 30) return AgeGroup.twenties;
+    if (age < 40) return AgeGroup.thirties;
+    if (age < 50) return AgeGroup.forties;
+    return AgeGroup.fiftyPlus;
+  }
+
+  Color _colorFromUid(String uid) {
+    const palette = [
+      Color(0xFF9B59B6),
+      Color(0xFF4A90D9),
+      Color(0xFF27AE60),
+      Color(0xFFE8516A),
+      Color(0xFF16A085),
+      Color(0xFFE67E22),
+      Color(0xFF2980B9),
+      Color(0xFF7F8C8D),
+    ];
+    final index = uid.codeUnits.fold(0, (a, b) => a + b) % palette.length;
+    return palette[index];
+  }
+
+  @override
   void dispose() {
     _searchCtrl.dispose();
     super.dispose();
   }
 
+  // ── filtering ────────────────────────────────────────────────────────────
+
+  // Re-apply isOnline from current _onlineUids before filtering so the list
+  // reflects live presence without re-fetching Firestore.
+  List<ActiveUser> get _usersWithPresence => _allUsers
+      .map(
+        (u) => ActiveUser(
+          id: u.id,
+          alias: u.alias,
+          gender: u.gender,
+          ageGroup: u.ageGroup,
+          location: u.location,
+          avatarColor: u.avatarColor,
+          isOnline: _onlineUids.contains(u.id),
+          bio: u.bio,
+        ),
+      )
+      .toList();
+
   List<ActiveUser> get _filtered {
     final query = _searchCtrl.text.trim().toLowerCase();
-    return mockActiveUsers.where((u) {
-      if (_onlineOnly && !u.isOnline) {
-        return false;
-      }
+    return _usersWithPresence.where((u) {
+      if (_onlineOnly && !u.isOnline) return false;
       if (_genderFilter != Gender.any && u.gender != _genderFilter) {
         return false;
       }
@@ -64,6 +200,8 @@ class _ActiveUsersScreenState extends State<ActiveUsersScreen> {
     }).toList();
   }
 
+  int get _onlineCount => _usersWithPresence.where((u) => u.isOnline).length;
+
   bool get _hasActiveFilters =>
       _genderFilter != Gender.any ||
       _ageFilter != AgeGroup.any ||
@@ -80,8 +218,6 @@ class _ActiveUsersScreenState extends State<ActiveUsersScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final filtered = _filtered;
-
     return Scaffold(
       backgroundColor: VailColors.mist,
       body: SafeArea(
@@ -92,15 +228,54 @@ class _ActiveUsersScreenState extends State<ActiveUsersScreen> {
             _buildSearchBar(),
             _buildFilterRow(),
             const SizedBox(height: 4),
-            Expanded(
-              child: filtered.isEmpty
-                  ? _buildEmpty()
-                  : _buildUserList(filtered),
-            ),
+            Expanded(child: _buildBody()),
           ],
         ),
       ),
     );
+  }
+
+  Widget _buildBody() {
+    if (_loading) {
+      return const Center(
+        child: CircularProgressIndicator(color: VailColors.rose),
+      );
+    }
+    if (_error != null) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.cloud_off_rounded,
+              size: 48,
+              color: VailColors.inkLight,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _error!,
+              style: GoogleFonts.inter(
+                fontSize: 14,
+                color: VailColors.inkLight,
+              ),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: () {
+                setState(() {
+                  _error = null;
+                  _loading = true;
+                });
+                _loadUsers();
+              },
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+    }
+    final filtered = _filtered;
+    return filtered.isEmpty ? _buildEmpty() : _buildUserList(filtered);
   }
 
   // ── header ──────────────────────────────────────────────────────────────────
@@ -140,7 +315,7 @@ class _ActiveUsersScreenState extends State<ActiveUsersScreen> {
             ],
           ),
           const Spacer(),
-          // online count badge
+          // live online count badge
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
@@ -159,7 +334,7 @@ class _ActiveUsersScreenState extends State<ActiveUsersScreen> {
                 ),
                 const SizedBox(width: 5),
                 Text(
-                  '${mockActiveUsers.where((u) => u.isOnline).length} online',
+                  '$_onlineCount online',
                   style: GoogleFonts.inter(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
@@ -293,7 +468,6 @@ class _ActiveUsersScreenState extends State<ActiveUsersScreen> {
                   onSelected: (v) => setState(() => _locationFilter = v),
                 ),
                 const SizedBox(width: 8),
-                // Online-only toggle chip
                 GestureDetector(
                   onTap: () => setState(() => _onlineOnly = !_onlineOnly),
                   child: AnimatedContainer(
@@ -374,7 +548,9 @@ class _ActiveUsersScreenState extends State<ActiveUsersScreen> {
           ),
           const SizedBox(height: 16),
           Text(
-            'No one matches those filters',
+            _allUsers.isEmpty
+                ? 'No other users yet'
+                : 'No one matches those filters',
             style: GoogleFonts.inter(
               fontSize: 16,
               fontWeight: FontWeight.w600,
@@ -383,24 +559,28 @@ class _ActiveUsersScreenState extends State<ActiveUsersScreen> {
           ),
           const SizedBox(height: 6),
           Text(
-            'Try broadening your search',
+            _allUsers.isEmpty
+                ? 'Check back once more people sign up'
+                : 'Try broadening your search',
             style: GoogleFonts.inter(
               fontSize: 13,
               color: VailColors.inkLight.withOpacity(0.6),
             ),
           ),
-          const SizedBox(height: 24),
-          TextButton(
-            onPressed: _clearFilters,
-            child: Text(
-              'Clear filters',
-              style: GoogleFonts.inter(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: VailColors.rose,
+          if (_hasActiveFilters) ...[
+            const SizedBox(height: 24),
+            TextButton(
+              onPressed: _clearFilters,
+              child: Text(
+                'Clear filters',
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: VailColors.rose,
+                ),
               ),
             ),
-          ),
+          ],
         ],
       ),
     );
@@ -546,7 +726,6 @@ class _UserCard extends StatelessWidget {
         ),
         child: Row(
           children: [
-            // Avatar
             Stack(
               children: [
                 Container(
@@ -588,7 +767,6 @@ class _UserCard extends StatelessWidget {
               ],
             ),
             const SizedBox(width: 14),
-            // Info
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -626,26 +804,27 @@ class _UserCard extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 2),
-                  Text(
-                    user.bio,
-                    style: GoogleFonts.inter(
-                      fontSize: 12,
-                      color: VailColors.inkLight,
-                      height: 1.4,
+                  if (user.bio.isNotEmpty)
+                    Text(
+                      user.bio,
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: VailColors.inkLight,
+                        height: 1.4,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
                   const SizedBox(height: 6),
-                  // Tags row
                   Wrap(
                     spacing: 6,
                     runSpacing: 2,
                     children: [
-                      _Tag(
-                        icon: Icons.location_on_outlined,
-                        label: user.location,
-                      ),
+                      if (user.location.isNotEmpty)
+                        _Tag(
+                          icon: Icons.location_on_outlined,
+                          label: user.location,
+                        ),
                       if (user.genderLabel.isNotEmpty)
                         _Tag(
                           icon: Icons.person_outline_rounded,
@@ -662,7 +841,6 @@ class _UserCard extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            // CTA arrow
             Container(
               width: 36,
               height: 36,
@@ -691,6 +869,7 @@ class _Tag extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
         Icon(icon, size: 12, color: VailColors.inkLight.withOpacity(0.7)),
         const SizedBox(width: 3),

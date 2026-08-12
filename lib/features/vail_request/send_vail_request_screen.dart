@@ -4,6 +4,8 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/theme.dart';
+import '../../core/user_profile_service.dart';
+import '../../core/vail_request_service.dart';
 import 'vail_request_models.dart';
 
 // ─── Send Vail Request Screen ─────────────────────────────────────────────────
@@ -21,23 +23,24 @@ class SendVailRequestScreen extends StatefulWidget {
 
 class _SendVailRequestScreenState extends State<SendVailRequestScreen>
     with TickerProviderStateMixin {
-  late final ActiveUser _user;
-  int _heartCount = 0; // starts at 0; first tap = 1 heart (the minimum send)
+  // Loaded from Firestore — null while loading.
+  ActiveUser? _user;
+  bool _loadError = false;
+
+  int _heartCount = 0;
   bool _sent = false;
+  bool _sending = false;
 
   late final AnimationController _heartPulse;
 
   @override
   void initState() {
     super.initState();
-    _user = mockActiveUsers.firstWhere(
-      (u) => u.id == widget.userId,
-      orElse: () => mockActiveUsers.first,
-    );
     _heartPulse = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 300),
     );
+    _loadTargetUser();
   }
 
   @override
@@ -46,16 +49,114 @@ class _SendVailRequestScreenState extends State<SendVailRequestScreen>
     super.dispose();
   }
 
+  // ── Load the target user's profile from Firestore ─────────────────────────
+
+  Future<void> _loadTargetUser() async {
+    try {
+      final profile = await UserProfileService.instance.fetchProfile(
+        widget.userId,
+      );
+      if (!mounted) return;
+      if (profile == null) {
+        setState(() => _loadError = true);
+        return;
+      }
+      // Map UserProfile → ActiveUser for the existing UI widgets.
+      setState(() {
+        _user = ActiveUser(
+          id: widget.userId,
+          alias: profile.nickname,
+          gender: _parseGender(profile.gender),
+          ageGroup: _parseAgeGroup(profile.age),
+          location: profile.town,
+          avatarColor: _colorFromUid(widget.userId),
+          isOnline: false, // presence not needed on this screen
+          bio: [
+            profile.occupation,
+            profile.hobbies,
+          ].where((s) => s.isNotEmpty).join(' · '),
+        );
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loadError = true);
+    }
+  }
+
+  Gender _parseGender(String g) => switch (g) {
+    'Man' => Gender.male,
+    'Woman' => Gender.female,
+    'Non-binary' => Gender.nonBinary,
+    _ => Gender.any,
+  };
+
+  AgeGroup _parseAgeGroup(int age) {
+    if (age < 20) return AgeGroup.teens;
+    if (age < 30) return AgeGroup.twenties;
+    if (age < 40) return AgeGroup.thirties;
+    if (age < 50) return AgeGroup.forties;
+    return AgeGroup.fiftyPlus;
+  }
+
+  Color _colorFromUid(String uid) {
+    const palette = [
+      Color(0xFF9B59B6),
+      Color(0xFF4A90D9),
+      Color(0xFF27AE60),
+      Color(0xFFE8516A),
+      Color(0xFF16A085),
+      Color(0xFFE67E22),
+      Color(0xFF2980B9),
+      Color(0xFF7F8C8D),
+    ];
+    final index = uid.codeUnits.fold(0, (a, b) => a + b) % palette.length;
+    return palette[index];
+  }
+
+  // ── Actions ───────────────────────────────────────────────────────────────
+
   void _addHeart() {
     HapticFeedback.lightImpact();
     setState(() => _heartCount = (_heartCount + 1).clamp(0, 12));
     _heartPulse.forward(from: 0);
   }
 
-  void _send() {
+  Future<void> _send() async {
+    if (_sending) return;
     HapticFeedback.mediumImpact();
-    // In a real app: send to backend here.
-    setState(() => _sent = true);
+    setState(() => _sending = true);
+
+    try {
+      // Fetch the current user's nickname to use as senderAlias.
+      final uid = UserProfileService.instance.currentUid;
+      final myProfile = await UserProfileService.instance.fetchProfile(uid);
+      final alias = myProfile?.nickname ?? 'Stranger';
+
+      await VailRequestService.instance.sendRequest(
+        receiverId: widget.userId,
+        senderAlias: alias,
+        heartCount: _heartCount == 0 ? 1 : _heartCount,
+      );
+
+      if (mounted) setState(() => _sent = true);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Could not send request. Please try again.',
+              style: GoogleFonts.inter(fontSize: 14),
+            ),
+            backgroundColor: VailColors.rose,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
   }
 
   @override
@@ -99,26 +200,65 @@ class _SendVailRequestScreenState extends State<SendVailRequestScreen>
                   ),
                 ),
 
-                Expanded(
-                  child: AnimatedSwitcher(
-                    duration: 500.ms,
-                    child: _sent
-                        ? _SentView(user: _user)
-                        : _ComposeView(
-                            key: const ValueKey('compose'),
-                            user: _user,
-                            heartCount: _heartCount,
-                            heartPulse: _heartPulse,
-                            onAddHeart: _addHeart,
-                            onSend: _send,
-                          ),
-                  ),
-                ),
+                Expanded(child: _buildBody()),
               ],
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildBody() {
+    // Loading state
+    if (_user == null && !_loadError) {
+      return const Center(
+        child: CircularProgressIndicator(color: Colors.white54),
+      );
+    }
+
+    // Error state
+    if (_loadError) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.cloud_off_rounded,
+              size: 48,
+              color: Colors.white38,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Could not load this user.',
+              style: GoogleFonts.inter(fontSize: 15, color: Colors.white70),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: () {
+                setState(() => _loadError = false);
+                _loadTargetUser();
+              },
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return AnimatedSwitcher(
+      duration: 500.ms,
+      child: _sent
+          ? _SentView(user: _user!)
+          : _ComposeView(
+              key: const ValueKey('compose'),
+              user: _user!,
+              heartCount: _heartCount,
+              heartPulse: _heartPulse,
+              onAddHeart: _addHeart,
+              onSend: _send,
+              sending: _sending,
+            ),
     );
   }
 }
@@ -133,6 +273,7 @@ class _ComposeView extends StatelessWidget {
     required this.heartPulse,
     required this.onAddHeart,
     required this.onSend,
+    this.sending = false,
   });
 
   final ActiveUser user;
@@ -140,6 +281,7 @@ class _ComposeView extends StatelessWidget {
   final AnimationController heartPulse;
   final VoidCallback onAddHeart;
   final VoidCallback onSend;
+  final bool sending;
 
   // Generates the display hearts row
   Widget _hearts() {
@@ -324,7 +466,7 @@ class _ComposeView extends StatelessWidget {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: onSend,
+              onPressed: sending ? null : onSend,
               style: ElevatedButton.styleFrom(
                 backgroundColor: VailColors.rose,
                 foregroundColor: Colors.white,
@@ -334,20 +476,29 @@ class _ComposeView extends StatelessWidget {
                 ),
                 elevation: 0,
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.send_rounded, size: 18),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Send Vail Request',
-                    style: GoogleFonts.inter(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
+              child: sending
+                  ? const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.send_rounded, size: 18),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Send Vail Request',
+                          style: GoogleFonts.inter(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                ],
-              ),
             ),
           ).animate(delay: 350.ms).fadeIn().slideY(begin: 0.08),
 
