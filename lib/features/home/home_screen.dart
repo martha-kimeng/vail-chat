@@ -4,12 +4,14 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/auth_service.dart';
+import '../../core/conversation_service.dart';
 import '../../core/theme.dart';
 import '../../core/user_profile_service.dart';
 import '../../core/vail_request_service.dart';
 import '../profile/user_profile.dart';
 
-// ─── Mock data ────────────────────────────────────────────────────────────────
+// ─── Internal view model ──────────────────────────────────────────────────────
+// Keeps the tile/card UI decoupled from the Firestore model.
 class _Conversation {
   const _Conversation({
     required this.id,
@@ -22,61 +24,61 @@ class _Conversation {
   });
 
   final String id;
-  final String alias; // Anonymous nickname
+  final String alias;
   final String lastMessage;
   final String time;
   final int unread;
-  final bool hasChemistry; // mutual spark signalled
+  final bool hasChemistry;
   final Color avatarColor;
 }
 
-final _mockConversations = [
-  const _Conversation(
-    id: 'c1',
-    alias: 'NightOwl42',
-    lastMessage: 'That playlist you mentioned — I listened all night.',
-    time: '11:42 PM',
-    unread: 2,
-    hasChemistry: true,
-    avatarColor: Color(0xFF9B59B6),
-  ),
-  const _Conversation(
-    id: 'c2',
-    alias: 'DesertSage',
-    lastMessage: 'Honestly? I think you\'re right about that.',
-    time: '9:15 PM',
-    unread: 0,
-    hasChemistry: false,
-    avatarColor: Color(0xFF4A90D9),
-  ),
-  const _Conversation(
-    id: 'c3',
-    alias: 'VelvetEcho',
-    lastMessage: '😂 ok that was actually hilarious',
-    time: 'Yesterday',
-    unread: 1,
-    hasChemistry: false,
-    avatarColor: Color(0xFF27AE60),
-  ),
-  const _Conversation(
-    id: 'c4',
-    alias: 'CrimsonWave',
-    lastMessage: 'Same time tomorrow?',
-    time: 'Yesterday',
-    unread: 0,
-    hasChemistry: true,
-    avatarColor: Color(0xFFE8516A),
-  ),
-  const _Conversation(
-    id: 'c5',
-    alias: 'FrostedPine',
-    lastMessage: 'You\'ve got a really interesting perspective on this.',
-    time: 'Mon',
-    unread: 0,
-    hasChemistry: false,
-    avatarColor: Color(0xFF16A085),
-  ),
-];
+/// Maps a [ConversationDoc] to the internal [_Conversation] view model.
+_Conversation _toViewModel(ConversationDoc doc, String currentUid) {
+  const palette = [
+    Color(0xFF9B59B6),
+    Color(0xFF4A90D9),
+    Color(0xFF27AE60),
+    Color(0xFFE8516A),
+    Color(0xFF16A085),
+    Color(0xFFE67E22),
+    Color(0xFF2980B9),
+    Color(0xFF7F8C8D),
+  ];
+  final otherId = doc.participants.firstWhere(
+    (p) => p != currentUid,
+    orElse: () => doc.id,
+  );
+  final colorIndex =
+      otherId.codeUnits.fold(0, (a, b) => a + b) % palette.length;
+
+  return _Conversation(
+    id: doc.id,
+    alias: doc.otherAlias,
+    lastMessage: doc.lastMessage,
+    time: _formatTime(doc.lastMessageAt),
+    unread: doc.unreadFor(currentUid),
+    hasChemistry: doc.mutualChemistry,
+    avatarColor: palette[colorIndex],
+  );
+}
+
+String _formatTime(DateTime dt) {
+  final now = DateTime.now();
+  final diff = now.difference(dt);
+  if (diff.inMinutes < 1) return 'Now';
+  if (diff.inHours < 1) return '${diff.inMinutes}m';
+  if (diff.inDays < 1) {
+    final h = dt.hour.toString().padLeft(2, '0');
+    final m = dt.minute.toString().padLeft(2, '0');
+    return '$h:$m';
+  }
+  if (diff.inDays == 1) return 'Yesterday';
+  if (diff.inDays < 7) {
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    return days[dt.weekday - 1];
+  }
+  return '${dt.day}/${dt.month}';
+}
 
 // ─── Avatar menu actions ──────────────────────────────────────────────────────
 enum _AvatarAction { profile, signOut }
@@ -151,7 +153,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             Expanded(
               child: _tabIndex == 0
-                  ? _ConversationList(conversations: _mockConversations)
+                  ? _ChatsTab()
                   : _tabIndex == 1
                   ? const _MatchesTab()
                   : const _VailRequestsTab(),
@@ -398,6 +400,66 @@ class _TabPill extends StatelessWidget {
   }
 }
 
+// ─── Chats tab ────────────────────────────────────────────────────────────────
+class _ChatsTab extends StatelessWidget {
+  _ChatsTab();
+
+  final String _uid = UserProfileService.instance.currentUid;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<ConversationDoc>>(
+      stream: ConversationService.instance.conversationsStream(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: CircularProgressIndicator(color: VailColors.rose),
+          );
+        }
+        final docs = snapshot.data ?? [];
+        if (docs.isEmpty) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(40),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.chat_bubble_outline_rounded,
+                    size: 56,
+                    color: VailColors.inkLight.withOpacity(0.3),
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    'No conversations yet',
+                    style: GoogleFonts.playfairDisplay(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      color: VailColors.ink,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Send a Vail Request to start your first anonymous chat.',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      color: VailColors.inkLight,
+                      height: 1.6,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+        final conversations = docs.map((d) => _toViewModel(d, _uid)).toList();
+        return _ConversationList(conversations: conversations);
+      },
+    );
+  }
+}
+
 // ─── Conversations list ────────────────────────────────────────────────────────
 class _ConversationList extends StatelessWidget {
   const _ConversationList({required this.conversations});
@@ -583,41 +645,54 @@ class _MatchesTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final sparks = _mockConversations.where((c) => c.hasChemistry).toList();
-
-    return sparks.isEmpty
-        ? const _EmptyMatches()
-        : ListView(
-            padding: const EdgeInsets.all(20),
-            children: [
-              Text(
-                'Mutual chemistry',
-                style: GoogleFonts.playfairDisplay(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w700,
-                  color: VailColors.ink,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Both of you felt the spark. Time to take the next step.',
-                style: GoogleFonts.inter(
-                  fontSize: 14,
-                  color: VailColors.inkLight,
-                  height: 1.5,
-                ),
-              ),
-              const SizedBox(height: 20),
-              ...sparks.asMap().entries.map((entry) {
-                final i = entry.key;
-                final c = entry.value;
-                return _SparkCard(conversation: c)
-                    .animate(delay: (i * 80).ms)
-                    .fadeIn(duration: 300.ms)
-                    .slideY(begin: 0.06);
-              }),
-            ],
+    final uid = UserProfileService.instance.currentUid;
+    return StreamBuilder<List<ConversationDoc>>(
+      stream: ConversationService.instance.sparkConversationsStream(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: CircularProgressIndicator(color: VailColors.rose),
           );
+        }
+        final sparks = (snapshot.data ?? [])
+            .map((d) => _toViewModel(d, uid))
+            .toList();
+
+        return sparks.isEmpty
+            ? const _EmptyMatches()
+            : ListView(
+                padding: const EdgeInsets.all(20),
+                children: [
+                  Text(
+                    'Mutual chemistry',
+                    style: GoogleFonts.playfairDisplay(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                      color: VailColors.ink,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Both of you felt the spark. Time to take the next step.',
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      color: VailColors.inkLight,
+                      height: 1.5,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  ...sparks.asMap().entries.map((entry) {
+                    final i = entry.key;
+                    final c = entry.value;
+                    return _SparkCard(conversation: c)
+                        .animate(delay: (i * 80).ms)
+                        .fadeIn(duration: 300.ms)
+                        .slideY(begin: 0.06);
+                  }),
+                ],
+              );
+      },
+    );
   }
 }
 

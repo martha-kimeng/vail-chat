@@ -1,10 +1,14 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../core/conversation_service.dart';
 import '../../core/theme.dart';
 
-// ─── Models ───────────────────────────────────────────────────────────────────
+// ─── Internal display model ───────────────────────────────────────────────────
+// Keeps UI widgets decoupled from Firestore types.
+
 enum _Sender { me, other }
 
 class _Message {
@@ -21,39 +25,6 @@ class _Message {
   final bool isSystem;
 }
 
-final _mockMessages = [
-  const _Message(
-    text: 'Two anonymous strangers have been connected. Say hi 👋',
-    sender: _Sender.other,
-    time: '9:00 PM',
-    isSystem: true,
-  ),
-  const _Message(
-      text: 'Hey! This is kind of wild — no idea who you are.',
-      sender: _Sender.other,
-      time: '9:01 PM'),
-  const _Message(
-      text: 'Right? I kind of love it. Forces you to actually talk.',
-      sender: _Sender.me,
-      time: '9:02 PM'),
-  const _Message(
-      text: 'Exactly. So... what\'s something you\'re weirdly passionate about?',
-      sender: _Sender.other,
-      time: '9:03 PM'),
-  const _Message(
-      text: 'Old film scores. Like, I will argue at length that Ennio Morricone changed cinema.',
-      sender: _Sender.me,
-      time: '9:05 PM'),
-  const _Message(
-      text: 'Oh wow. That\'s not what I expected but I\'m here for it.',
-      sender: _Sender.other,
-      time: '9:06 PM'),
-  const _Message(
-      text: 'That playlist you mentioned — I listened all night.',
-      sender: _Sender.other,
-      time: '11:42 PM'),
-];
-
 // ─── Screen ───────────────────────────────────────────────────────────────────
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key, required this.conversationId});
@@ -66,8 +37,36 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final _textCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
-  final List<_Message> _messages = List.from(_mockMessages);
+
+  // Loaded from Firestore — null until the first stream event.
+  ConversationDoc? _conversation;
   bool _chemistrySignalled = false;
+  bool _sendingChemistry = false;
+
+  final String _uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadConversation();
+  }
+
+  Future<void> _loadConversation() async {
+    final doc = await ConversationService.instance.fetchConversation(
+      widget.conversationId,
+    );
+    if (!mounted) return;
+    if (doc != null) {
+      setState(() {
+        _conversation = doc;
+        // If the current user already signalled before opening chat,
+        // reflect that in the button state.
+        _chemistrySignalled = doc.hasSignalled(_uid);
+      });
+      // Reset unread counter for this user.
+      await ConversationService.instance.markRead(widget.conversationId);
+    }
+  }
 
   @override
   void dispose() {
@@ -76,87 +75,188 @@ class _ChatScreenState extends State<ChatScreen> {
     super.dispose();
   }
 
-  void _send() {
+  // ── Send ─────────────────────────────────────────────────────────────────
+
+  Future<void> _send() async {
     final text = _textCtrl.text.trim();
     if (text.isEmpty) return;
-    setState(() {
-      _messages.add(_Message(
-        text: text,
-        sender: _Sender.me,
-        time: 'Now',
-      ));
-      _textCtrl.clear();
-    });
-    Future.delayed(50.ms, () {
-      _scrollCtrl.animateTo(
-        _scrollCtrl.position.maxScrollExtent,
-        duration: 300.ms,
-        curve: Curves.easeOut,
-      );
+    _textCtrl.clear();
+
+    final participants = _conversation?.participants ?? [_uid];
+    await ConversationService.instance.sendMessage(
+      conversationId: widget.conversationId,
+      text: text,
+      participants: participants,
+    );
+
+    // Scroll to bottom after the stream rebuilds.
+    Future.delayed(80.ms, () {
+      if (_scrollCtrl.hasClients) {
+        _scrollCtrl.animateTo(
+          _scrollCtrl.position.maxScrollExtent,
+          duration: 300.ms,
+          curve: Curves.easeOut,
+        );
+      }
     });
   }
 
-  void _signalChemistry() {
-    setState(() => _chemistrySignalled = true);
+  // ── Chemistry / Spark ─────────────────────────────────────────────────────
+
+  void _onChemistryTap() {
+    if (_chemistrySignalled || _sendingChemistry) return;
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (_) => _ChemistrySheet(
-        onConfirm: () {
+        onConfirm: () async {
           Navigator.pop(context);
-          context.go('/profile/${widget.conversationId}');
+          await _signalChemistry();
         },
+        onCancel: () => Navigator.pop(context),
       ),
     );
   }
 
+  Future<void> _signalChemistry() async {
+    setState(() => _sendingChemistry = true);
+    try {
+      final isMutual = await ConversationService.instance.signalChemistry(
+        widget.conversationId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _chemistrySignalled = true;
+        _sendingChemistry = false;
+      });
+      if (isMutual) {
+        // Both parties felt it — navigate to the profile reveal screen.
+        context.go('/profile/${widget.conversationId}');
+      }
+    } catch (_) {
+      if (mounted) setState(() => _sendingChemistry = false);
+    }
+  }
+
+  // ── Map Firestore message to display model ────────────────────────────────
+
+  _Message _toDisplayMessage(MessageDoc m) {
+    final time = _formatTime(m.sentAt);
+    if (m.isSystem) {
+      return _Message(
+        text: m.text,
+        sender: _Sender.other,
+        time: time,
+        isSystem: true,
+      );
+    }
+    return _Message(
+      text: m.text,
+      sender: m.senderId == _uid ? _Sender.me : _Sender.other,
+      time: time,
+    );
+  }
+
+  String _formatTime(DateTime dt) {
+    final h = dt.hour.toString().padLeft(2, '0');
+    final m = dt.minute.toString().padLeft(2, '0');
+    return '$h:$m';
+  }
+
+  // ── Build ─────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
-    // Alias derived from id for the mock
-    final alias = _aliasFromId(widget.conversationId);
+    // Derive alias: use the other participant's name from the conversation doc,
+    // or fall back to 'Stranger' while loading.
+    final alias = _conversation != null
+        ? _conversation!.otherAlias
+        : 'Stranger';
 
     return Scaffold(
       backgroundColor: VailColors.mist,
       appBar: _ChatAppBar(
         alias: alias,
         chemistrySignalled: _chemistrySignalled,
-        onChemistryTap: _signalChemistry,
+        sendingChemistry: _sendingChemistry,
+        onChemistryTap: _onChemistryTap,
         onBackTap: () => context.go('/home'),
       ),
       body: Column(
         children: [
           Expanded(
-            child: ListView.builder(
-              controller: _scrollCtrl,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              itemCount: _messages.length,
-              itemBuilder: (context, i) {
-                final msg = _messages[i];
-                return _MessageBubble(message: msg)
-                    .animate(delay: (i * 40).ms)
-                    .fadeIn(duration: 250.ms)
-                    .slideY(begin: 0.05);
+            child: StreamBuilder<List<MessageDoc>>(
+              stream: ConversationService.instance.messagesStream(
+                widget.conversationId,
+              ),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting &&
+                    !snapshot.hasData) {
+                  return const Center(
+                    child: CircularProgressIndicator(color: VailColors.rose),
+                  );
+                }
+                final messages = (snapshot.data ?? [])
+                    .map(_toDisplayMessage)
+                    .toList();
+
+                // Auto-scroll when new messages arrive.
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (_scrollCtrl.hasClients &&
+                      _scrollCtrl.position.maxScrollExtent > 0) {
+                    _scrollCtrl.animateTo(
+                      _scrollCtrl.position.maxScrollExtent,
+                      duration: 200.ms,
+                      curve: Curves.easeOut,
+                    );
+                  }
+                });
+
+                if (messages.isEmpty) {
+                  return Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.chat_bubble_outline_rounded,
+                          size: 48,
+                          color: VailColors.inkLight.withOpacity(0.3),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Say hello 👋',
+                          style: GoogleFonts.inter(
+                            fontSize: 15,
+                            color: VailColors.inkLight,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+
+                return ListView.builder(
+                  controller: _scrollCtrl,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  itemCount: messages.length,
+                  itemBuilder: (context, i) {
+                    final msg = messages[i];
+                    return _MessageBubble(message: msg)
+                        .animate(delay: (i * 40).ms)
+                        .fadeIn(duration: 250.ms)
+                        .slideY(begin: 0.05);
+                  },
+                );
               },
             ),
           ),
-          _InputBar(
-            controller: _textCtrl,
-            onSend: _send,
-          ),
+          _InputBar(controller: _textCtrl, onSend: _send),
         ],
       ),
     );
-  }
-
-  String _aliasFromId(String id) {
-    const map = {
-      'c1': 'NightOwl42',
-      'c2': 'DesertSage',
-      'c3': 'VelvetEcho',
-      'c4': 'CrimsonWave',
-      'c5': 'FrostedPine',
-    };
-    return map[id] ?? 'Stranger';
   }
 }
 
@@ -165,12 +265,14 @@ class _ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
   const _ChatAppBar({
     required this.alias,
     required this.chemistrySignalled,
+    required this.sendingChemistry,
     required this.onChemistryTap,
     required this.onBackTap,
   });
 
   final String alias;
   final bool chemistrySignalled;
+  final bool sendingChemistry;
   final VoidCallback onChemistryTap;
   final VoidCallback onBackTap;
 
@@ -182,14 +284,20 @@ class _ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
     return Container(
       color: Colors.white,
       padding: EdgeInsets.only(
-          top: MediaQuery.of(context).padding.top, left: 8, right: 16),
+        top: MediaQuery.of(context).padding.top,
+        left: 8,
+        right: 16,
+      ),
       child: SizedBox(
         height: 64,
         child: Row(
           children: [
             IconButton(
-              icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                  size: 20, color: VailColors.ink),
+              icon: const Icon(
+                Icons.arrow_back_ios_new_rounded,
+                size: 20,
+                color: VailColors.ink,
+              ),
               onPressed: onBackTap,
             ),
             // Anonymous avatar
@@ -200,8 +308,11 @@ class _ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
                 shape: BoxShape.circle,
                 color: VailColors.rose.withOpacity(0.12),
               ),
-              child: const Icon(Icons.person_outline_rounded,
-                  color: VailColors.rose, size: 22),
+              child: const Icon(
+                Icons.person_outline_rounded,
+                color: VailColors.rose,
+                size: 22,
+              ),
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -229,10 +340,11 @@ class _ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        'Anonymous · Online',
+                        'Anonymous',
                         style: GoogleFonts.inter(
-                            fontSize: 11,
-                            color: VailColors.inkLight.withOpacity(0.6)),
+                          fontSize: 11,
+                          color: VailColors.inkLight.withOpacity(0.6),
+                        ),
                       ),
                     ],
                   ),
@@ -241,42 +353,55 @@ class _ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
             ),
             // Chemistry button
             GestureDetector(
-              onTap: chemistrySignalled ? null : onChemistryTap,
+              onTap: (chemistrySignalled || sendingChemistry)
+                  ? null
+                  : onChemistryTap,
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 300),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 7,
+                ),
                 decoration: BoxDecoration(
                   color: chemistrySignalled
                       ? VailColors.rose
                       : VailColors.roseSoft,
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      chemistrySignalled
-                          ? Icons.favorite_rounded
-                          : Icons.favorite_border_rounded,
-                      size: 14,
-                      color: chemistrySignalled
-                          ? Colors.white
-                          : VailColors.rose,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      chemistrySignalled ? 'Sparked!' : 'Spark',
-                      style: GoogleFonts.inter(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: chemistrySignalled
-                            ? Colors.white
-                            : VailColors.rose,
+                child: sendingChemistry
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: VailColors.rose,
+                        ),
+                      )
+                    : Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            chemistrySignalled
+                                ? Icons.favorite_rounded
+                                : Icons.favorite_border_rounded,
+                            size: 14,
+                            color: chemistrySignalled
+                                ? Colors.white
+                                : VailColors.rose,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            chemistrySignalled ? 'Sparked!' : 'Spark',
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: chemistrySignalled
+                                  ? Colors.white
+                                  : VailColors.rose,
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                  ],
-                ),
               ),
             ),
           ],
@@ -305,9 +430,10 @@ class _MessageBubble extends StatelessWidget {
           child: Text(
             message.text,
             style: GoogleFonts.inter(
-                fontSize: 12,
-                color: VailColors.inkLight.withOpacity(0.7),
-                fontStyle: FontStyle.italic),
+              fontSize: 12,
+              color: VailColors.inkLight.withOpacity(0.7),
+              fontStyle: FontStyle.italic,
+            ),
           ),
         ),
       );
@@ -342,8 +468,9 @@ class _MessageBubble extends StatelessWidget {
           ],
         ),
         child: Column(
-          crossAxisAlignment:
-              isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          crossAxisAlignment: isMe
+              ? CrossAxisAlignment.end
+              : CrossAxisAlignment.start,
           children: [
             Text(
               message.text,
@@ -358,8 +485,9 @@ class _MessageBubble extends StatelessWidget {
               message.time,
               style: GoogleFonts.inter(
                 fontSize: 10,
-                color:
-                    isMe ? Colors.white60 : VailColors.inkLight.withOpacity(0.5),
+                color: isMe
+                    ? Colors.white60
+                    : VailColors.inkLight.withOpacity(0.5),
               ),
             ),
           ],
@@ -394,11 +522,14 @@ class _InputBar extends StatelessWidget {
               decoration: InputDecoration(
                 hintText: 'Type something...',
                 hintStyle: GoogleFonts.inter(
-                    color: VailColors.inkLight.withOpacity(0.4)),
+                  color: VailColors.inkLight.withOpacity(0.4),
+                ),
                 filled: true,
                 fillColor: VailColors.mist,
                 contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 12),
+                  horizontal: 16,
+                  vertical: 12,
+                ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(24),
                   borderSide: BorderSide.none,
@@ -410,7 +541,9 @@ class _InputBar extends StatelessWidget {
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(24),
                   borderSide: const BorderSide(
-                      color: VailColors.rose, width: 1.5),
+                    color: VailColors.rose,
+                    width: 1.5,
+                  ),
                 ),
               ),
               onSubmitted: (_) => onSend(),
@@ -426,8 +559,11 @@ class _InputBar extends StatelessWidget {
                 color: VailColors.rose,
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.send_rounded,
-                  color: Colors.white, size: 20),
+              child: const Icon(
+                Icons.send_rounded,
+                color: Colors.white,
+                size: 20,
+              ),
             ),
           ),
         ],
@@ -438,8 +574,9 @@ class _InputBar extends StatelessWidget {
 
 // ─── Chemistry bottom sheet ───────────────────────────────────────────────────
 class _ChemistrySheet extends StatelessWidget {
-  const _ChemistrySheet({required this.onConfirm});
+  const _ChemistrySheet({required this.onConfirm, required this.onCancel});
   final VoidCallback onConfirm;
+  final VoidCallback onCancel;
 
   @override
   Widget build(BuildContext context) {
@@ -463,21 +600,25 @@ class _ChemistrySheet extends StatelessWidget {
           ),
           const SizedBox(height: 28),
           Container(
-            width: 72,
-            height: 72,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: VailColors.rose.withOpacity(0.1),
-            ),
-            child: const Icon(Icons.favorite_rounded,
-                color: VailColors.rose, size: 36),
-          )
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: VailColors.rose.withOpacity(0.1),
+                ),
+                child: const Icon(
+                  Icons.favorite_rounded,
+                  color: VailColors.rose,
+                  size: 36,
+                ),
+              )
               .animate(onPlay: (c) => c.repeat(reverse: true))
               .scale(
-                  begin: const Offset(1, 1),
-                  end: const Offset(1.1, 1.1),
-                  duration: 800.ms,
-                  curve: Curves.easeInOut),
+                begin: const Offset(1, 1),
+                end: const Offset(1.1, 1.1),
+                duration: 800.ms,
+                curve: Curves.easeInOut,
+              ),
           const SizedBox(height: 20),
           Text(
             'Signal the spark?',
@@ -492,7 +633,10 @@ class _ChemistrySheet extends StatelessWidget {
             "If the feeling is mutual, both of you will be notified and you can plan a blind date. They won't know unless they feel it too.",
             textAlign: TextAlign.center,
             style: GoogleFonts.inter(
-                fontSize: 14, color: VailColors.inkLight, height: 1.6),
+              fontSize: 14,
+              color: VailColors.inkLight,
+              height: 1.6,
+            ),
           ),
           const SizedBox(height: 28),
           ElevatedButton(
@@ -501,7 +645,7 @@ class _ChemistrySheet extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: onCancel,
             child: Text(
               'Not yet',
               style: GoogleFonts.inter(color: VailColors.inkLight),

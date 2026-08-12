@@ -35,26 +35,6 @@ class VailRequestDoc {
   }
 }
 
-// ─── Firestore model for a Conversation document ─────────────────────────────
-
-class ConversationDoc {
-  const ConversationDoc({
-    required this.id,
-    required this.participants,
-    required this.vailRequestId,
-    required this.createdAt,
-    this.lastMessage = '',
-    this.lastMessageAt,
-  });
-
-  final String id;
-  final List<String> participants;
-  final String vailRequestId;
-  final DateTime createdAt;
-  final String lastMessage;
-  final DateTime? lastMessageAt;
-}
-
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 class VailRequestService {
@@ -145,10 +125,7 @@ class VailRequestService {
       'chemistrySignals': <String>[],
       'mutualChemistry': false,
       // Track unread counts per participant.
-      'unreadCount': {
-        request.senderId: 0,
-        uid: 0,
-      },
+      'unreadCount': {request.senderId: 0, uid: 0},
     });
 
     // 2. Update the request status.
@@ -182,8 +159,8 @@ class VailRequestService {
   }
 
   VailRequestStatus _parseStatus(String? s) => switch (s) {
-        'unveiled' => VailRequestStatus.unveiled,
-        'declined' => VailRequestStatus.declined,
-        _ => VailRequestStatus.pending,
-      };
+    'unveiled' => VailRequestStatus.unveiled,
+    'declined' => VailRequestStatus.declined,
+    _ => VailRequestStatus.pending,
+  };
 }
