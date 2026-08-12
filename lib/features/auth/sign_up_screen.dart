@@ -1,7 +1,9 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../core/auth_service.dart';
 import '../../core/theme.dart';
 import '../../core/widgets/vail_field.dart';
 
@@ -38,6 +40,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
   String? _maritalStatus;
 
   int _step = 1;
+  bool _loading = false;
 
   static const _genders = ['Man', 'Woman', 'Non-binary', 'Prefer not to say'];
   static const _meetOptions = ['Men', 'Women', 'Everyone'];
@@ -65,11 +68,41 @@ class _SignUpScreenState extends State<SignUpScreen> {
     }
   }
 
-  void _submit() {
-    if (_step2Key.currentState?.validate() ?? false) {
-      // In a real app: create account + save profile to backend here.
-      context.go('/home');
+  Future<void> _submit() async {
+    final formValid = _step2Key.currentState?.validate() ?? false;
+    if (!formValid ||
+        _age == null ||
+        _gender == null ||
+        _interestedIn.isEmpty) {
+      return;
     }
+    setState(() => _loading = true);
+    try {
+      await AuthService.instance.signUp(
+        email: _emailCtrl.text,
+        password: _passwordCtrl.text,
+      );
+      // TODO: persist nickname + profile data to Firestore under
+      // FirebaseAuth.instance.currentUser!.uid once Firestore is added.
+      if (mounted) context.go('/home');
+    } on FirebaseAuthException catch (e) {
+      if (mounted) _showError(AuthService.messageFor(e));
+    } catch (_) {
+      if (mounted) _showError('Something went wrong. Please try again.');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message, style: GoogleFonts.inter(fontSize: 14)),
+        backgroundColor: VailColors.rose,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
   }
 
   @override
@@ -142,6 +175,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                             setState(() => _maritalStatus = v),
                         onBack: () => setState(() => _step = 1),
                         onSubmit: _submit,
+                        loading: _loading,
                       ),
               ),
             ),
@@ -327,6 +361,7 @@ class _Step2 extends StatelessWidget {
     required this.onMaritalChanged,
     required this.onBack,
     required this.onSubmit,
+    this.loading = false,
   });
 
   final GlobalKey<FormState> formKey;
@@ -346,6 +381,7 @@ class _Step2 extends StatelessWidget {
   final ValueChanged<String?> onMaritalChanged;
   final VoidCallback onBack;
   final VoidCallback onSubmit;
+  final bool loading;
 
   @override
   Widget build(BuildContext context) {
@@ -480,16 +516,17 @@ class _Step2 extends StatelessWidget {
 
         // Submit
         ElevatedButton(
-          onPressed: () {
-            // Validate required selections before submitting
-            final formValid = formKey.currentState?.validate() ?? false;
-            if (formValid &&
-                age != null &&
-                gender != null &&
-                interestedIn.isNotEmpty) {
-              onSubmit();
-            }
-          },
+          onPressed: loading
+              ? null
+              : () {
+                  final formValid = formKey.currentState?.validate() ?? false;
+                  if (formValid &&
+                      age != null &&
+                      gender != null &&
+                      interestedIn.isNotEmpty) {
+                    onSubmit();
+                  }
+                },
           style: ElevatedButton.styleFrom(
             backgroundColor: VailColors.rose,
             minimumSize: const Size(double.infinity, 56),
@@ -498,14 +535,23 @@ class _Step2 extends StatelessWidget {
             ),
             elevation: 0,
           ),
-          child: Text(
-            'Create Account',
-            style: GoogleFonts.inter(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: Colors.white,
-            ),
-          ),
+          child: loading
+              ? const SizedBox(
+                  height: 20,
+                  width: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : Text(
+                  'Create Account',
+                  style: GoogleFonts.inter(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
+                ),
         ).animate(delay: 300.ms).fadeIn().slideY(begin: 0.08),
 
         const SizedBox(height: 40),

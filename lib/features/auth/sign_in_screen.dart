@@ -1,7 +1,9 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../core/auth_service.dart';
 import '../../core/theme.dart';
 import '../../core/widgets/vail_field.dart';
 
@@ -17,6 +19,7 @@ class _SignInScreenState extends State<SignInScreen> {
   final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
   bool _obscure = true;
+  bool _loading = false;
 
   @override
   void dispose() {
@@ -25,10 +28,63 @@ class _SignInScreenState extends State<SignInScreen> {
     super.dispose();
   }
 
-  void _submit() {
-    if (_formKey.currentState?.validate() ?? false) {
-      context.go('/home');
+  Future<void> _submit() async {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    setState(() => _loading = true);
+    try {
+      await AuthService.instance.signIn(
+        email: _emailCtrl.text,
+        password: _passwordCtrl.text,
+      );
+      if (mounted) context.go('/home');
+    } on FirebaseAuthException catch (e) {
+      if (mounted) {
+        _showError(AuthService.messageFor(e));
+      }
+    } catch (_) {
+      if (mounted) _showError('Something went wrong. Please try again.');
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Future<void> _forgotPassword() async {
+    final email = _emailCtrl.text.trim();
+    if (email.isEmpty || !email.contains('@')) {
+      _showError('Enter your email above, then tap "Forgot password?".');
+      return;
+    }
+    try {
+      await AuthService.instance.sendPasswordReset(email: email);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Password reset email sent to $email.',
+              style: GoogleFonts.inter(fontSize: 14),
+            ),
+            backgroundColor: const Color(0xFF2D2D2D),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        );
+      }
+    } on FirebaseAuthException catch (e) {
+      if (mounted) _showError(AuthService.messageFor(e));
+    }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message, style: GoogleFonts.inter(fontSize: 14)),
+        backgroundColor: VailColors.rose,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
   }
 
   @override
@@ -121,7 +177,7 @@ class _SignInScreenState extends State<SignInScreen> {
                               Align(
                                 alignment: Alignment.centerRight,
                                 child: TextButton(
-                                  onPressed: () {},
+                                  onPressed: _forgotPassword,
                                   child: Text(
                                     'Forgot password?',
                                     style: GoogleFonts.inter(
@@ -134,11 +190,20 @@ class _SignInScreenState extends State<SignInScreen> {
                               ),
                               const SizedBox(height: 12),
                               ElevatedButton(
-                                onPressed: _submit,
-                                child: Text(
-                                  'Sign In',
-                                  style: VailTextStyles.button(context),
-                                ),
+                                onPressed: _loading ? null : _submit,
+                                child: _loading
+                                    ? const SizedBox(
+                                        height: 20,
+                                        width: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.white,
+                                        ),
+                                      )
+                                    : Text(
+                                        'Sign In',
+                                        style: VailTextStyles.button(context),
+                                      ),
                               ),
                             ],
                           ),

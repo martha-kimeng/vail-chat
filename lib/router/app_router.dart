@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart';
 import 'package:go_router/go_router.dart';
+import '../core/auth_service.dart';
 import '../features/onboarding/onboarding_screen.dart';
 import '../features/auth/sign_up_screen.dart';
 import '../features/auth/sign_in_screen.dart';
@@ -11,8 +13,26 @@ import '../features/vail_request/send_vail_request_screen.dart';
 import '../features/vail_request/incoming_vail_requests_screen.dart';
 import '../features/profile/profile_screen.dart';
 
+/// Routes that are accessible without being signed in.
+const _publicRoutes = {'/sign-in', '/sign-up', '/onboarding'};
+
 final appRouter = GoRouter(
   initialLocation: '/sign-in',
+  // Rebuild the router whenever auth state changes so the redirect fires.
+  refreshListenable: _AuthNotifier(),
+  redirect: (context, state) {
+    final signedIn = AuthService.instance.currentUser != null;
+    final isPublic = _publicRoutes.contains(state.matchedLocation);
+
+    // Signed-in user trying to reach a public page → send to home.
+    if (signedIn && isPublic) return '/home';
+
+    // Unauthenticated user trying to reach a protected page → send to sign-in.
+    if (!signedIn && !isPublic) return '/sign-in';
+
+    // No redirect needed.
+    return null;
+  },
   routes: [
     GoRoute(
       path: '/onboarding',
@@ -63,3 +83,11 @@ final appRouter = GoRouter(
     ),
   ],
 );
+
+/// A [ChangeNotifier] that listens to Firebase auth state changes and notifies
+/// GoRouter so the redirect callback is re-evaluated on sign-in/sign-out.
+class _AuthNotifier extends ChangeNotifier {
+  _AuthNotifier() {
+    AuthService.instance.authStateChanges.listen((_) => notifyListeners());
+  }
+}

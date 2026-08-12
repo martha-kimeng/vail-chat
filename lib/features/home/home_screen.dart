@@ -3,6 +3,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../core/auth_service.dart';
 import '../../core/theme.dart';
 import '../vail_request/vail_request_models.dart';
 import '../profile/user_profile.dart';
@@ -75,6 +76,9 @@ final _mockConversations = [
     avatarColor: Color(0xFF16A085),
   ),
 ];
+
+// ─── Avatar menu actions ──────────────────────────────────────────────────────
+enum _AvatarAction { profile, signOut }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 class HomeScreen extends StatefulWidget {
@@ -183,9 +187,52 @@ class _HomeHeader extends StatelessWidget {
                 ],
               ),
               const Spacer(),
-              // Avatar — taps to profile
-              GestureDetector(
-                onTap: () => context.push('/profile'),
+              // Avatar — taps to profile or sign out
+              PopupMenuButton<_AvatarAction>(
+                offset: const Offset(0, 48),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                onSelected: (action) async {
+                  if (action == _AvatarAction.profile) {
+                    context.push('/profile');
+                  } else {
+                    await AuthService.instance.signOut();
+                    if (context.mounted) context.go('/sign-in');
+                  }
+                },
+                itemBuilder: (_) => [
+                  PopupMenuItem(
+                    value: _AvatarAction.profile,
+                    child: Row(
+                      children: [
+                        const Icon(Icons.person_outline_rounded, size: 18),
+                        const SizedBox(width: 10),
+                        Text('Profile', style: GoogleFonts.inter(fontSize: 14)),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: _AvatarAction.signOut,
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.logout_rounded,
+                          size: 18,
+                          color: VailColors.rose,
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          'Sign out',
+                          style: GoogleFonts.inter(
+                            fontSize: 14,
+                            color: VailColors.rose,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 child: Container(
                   width: 40,
                   height: 40,
