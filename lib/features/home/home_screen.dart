@@ -5,8 +5,9 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/auth_service.dart';
 import '../../core/theme.dart';
-import '../vail_request/vail_request_models.dart';
+import '../../core/user_profile_service.dart';
 import '../profile/user_profile.dart';
+import '../vail_request/vail_request_models.dart';
 
 // ─── Mock data ────────────────────────────────────────────────────────────────
 class _Conversation {
@@ -91,6 +92,33 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _tabIndex = 0;
 
+  // Live profile stream — keeps the avatar in sync with Firestore.
+  UserProfile? _profile;
+
+  @override
+  void initState() {
+    super.initState();
+    _subscribeToProfile();
+  }
+
+  void _subscribeToProfile() {
+    try {
+      final uid = UserProfileService.instance.currentUid;
+      UserProfileService.instance
+          .profileStream(uid)
+          .listen(
+            (profile) {
+              if (mounted) setState(() => _profile = profile);
+            },
+            onError: (_) {
+              /* silently ignore stream errors on home */
+            },
+          );
+    } catch (_) {
+      // No signed-in user yet — auth redirect will handle navigation.
+    }
+  }
+
   // Count of pending incoming Vail Requests — in a real app this would come
   // from a stream. Here we derive it from the shared mock list.
   int get _pendingVailCount => mockIncomingRequests
@@ -108,6 +136,7 @@ class _HomeScreenState extends State<HomeScreen> {
               tabIndex: _tabIndex,
               pendingVailCount: _pendingVailCount,
               onTabChanged: (i) => setState(() => _tabIndex = i),
+              profile: _profile,
             ),
             Expanded(
               child: _tabIndex == 0
@@ -151,10 +180,12 @@ class _HomeHeader extends StatelessWidget {
     required this.tabIndex,
     required this.onTabChanged,
     required this.pendingVailCount,
+    required this.profile,
   });
   final int tabIndex;
   final ValueChanged<int> onTabChanged;
   final int pendingVailCount;
+  final UserProfile? profile;
 
   @override
   Widget build(BuildContext context) {
@@ -245,15 +276,21 @@ class _HomeHeader extends StatelessWidget {
                     color: VailColors.roseSoft,
                   ),
                   clipBehavior: Clip.antiAlias,
-                  child: SvgPicture.network(
-                    currentUser.avatarUrl,
-                    fit: BoxFit.cover,
-                    placeholderBuilder: (_) => const Icon(
-                      Icons.person_outline_rounded,
-                      color: VailColors.rose,
-                      size: 22,
-                    ),
-                  ),
+                  child: profile != null
+                      ? SvgPicture.network(
+                          profile!.avatarUrl,
+                          fit: BoxFit.cover,
+                          placeholderBuilder: (_) => const Icon(
+                            Icons.person_outline_rounded,
+                            color: VailColors.rose,
+                            size: 22,
+                          ),
+                        )
+                      : const Icon(
+                          Icons.person_outline_rounded,
+                          color: VailColors.rose,
+                          size: 22,
+                        ),
                 ),
               ),
             ],

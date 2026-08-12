@@ -5,7 +5,9 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/auth_service.dart';
 import '../../core/theme.dart';
+import '../../core/user_profile_service.dart';
 import '../../core/widgets/vail_field.dart';
+import '../profile/user_profile.dart';
 
 // ─── Sign-Up Screen (2-step) ──────────────────────────────────────────────────
 // Step 1: Nickname, email, password
@@ -78,12 +80,39 @@ class _SignUpScreenState extends State<SignUpScreen> {
     }
     setState(() => _loading = true);
     try {
-      await AuthService.instance.signUp(
+      // Step 1: create the Firebase Auth account.
+      final credential = await AuthService.instance.signUp(
         email: _emailCtrl.text,
         password: _passwordCtrl.text,
       );
-      // TODO: persist nickname + profile data to Firestore under
-      // FirebaseAuth.instance.currentUser!.uid once Firestore is added.
+
+      // Step 2: persist the full profile to Firestore.
+      // The UID comes from the freshly-created auth credential.
+      final uid = credential.user!.uid;
+
+      // Build a deterministic avatar seed from the nickname so new users
+      // immediately have a distinct avatar without any extra input.
+      final avatarSeed = '${_nicknameCtrl.text.trim()}-${uid.substring(0, 6)}';
+
+      final profile = UserProfile(
+        nickname: _nicknameCtrl.text.trim(),
+        email: _emailCtrl.text.trim(),
+        age: _age!,
+        gender: _gender!,
+        town: _townCtrl.text.trim(),
+        interestedIn: List<String>.from(_interestedIn),
+        occupation: _occupationCtrl.text.trim(),
+        hobbies: _hobbiesCtrl.text.trim(),
+        maritalStatus: _maritalStatus ?? '',
+        avatarStyle: 'lorelei',
+        avatarSeed: avatarSeed,
+      );
+
+      await UserProfileService.instance.createProfile(
+        uid: uid,
+        profile: profile,
+      );
+
       if (mounted) context.go('/home');
     } on FirebaseAuthException catch (e) {
       if (mounted) _showError(AuthService.messageFor(e));

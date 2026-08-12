@@ -6,6 +6,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/theme.dart';
+import '../../core/user_profile_service.dart';
 import '../../core/widgets/vail_field.dart';
 import 'user_profile.dart';
 
@@ -19,6 +20,10 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
+  // Null while loading from Firestore.
+  UserProfile? _profile;
+  bool _loadError = false;
+
   // We work on a local copy and only commit on Save.
   late UserProfile _draft;
   bool _editing = false;
@@ -45,13 +50,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void initState() {
     super.initState();
-    _resetDraft();
+    _loadProfile();
   }
 
-  void _resetDraft() {
-    _draft = currentUser.copyWith(
-      interestedIn: List.from(currentUser.interestedIn),
-    );
+  // ── Load from Firestore ─────────────────────────────────────────────────────
+
+  Future<void> _loadProfile() async {
+    try {
+      final uid = UserProfileService.instance.currentUid;
+      final profile = await UserProfileService.instance.fetchProfile(uid);
+      if (!mounted) return;
+      if (profile != null) {
+        setState(() {
+          _profile = profile;
+          _initDraft(profile);
+        });
+      } else {
+        setState(() => _loadError = true);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadError = true);
+    }
+  }
+
+  void _initDraft(UserProfile source) {
+    _draft = source.copyWith(interestedIn: List.from(source.interestedIn));
     _nicknameCtrl = TextEditingController(text: _draft.nickname);
     _emailCtrl = TextEditingController(text: _draft.email);
     _townCtrl = TextEditingController(text: _draft.town);
@@ -59,13 +82,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _hobbiesCtrl = TextEditingController(text: _draft.hobbies);
   }
 
-  @override
-  void dispose() {
+  void _resetDraft() {
+    if (_profile == null) return;
     _nicknameCtrl.dispose();
     _emailCtrl.dispose();
     _townCtrl.dispose();
     _occupationCtrl.dispose();
     _hobbiesCtrl.dispose();
+    _initDraft(_profile!);
+  }
+
+  @override
+  void dispose() {
+    // Controllers may not be initialised if the profile never loaded.
+    if (_profile != null) {
+      _nicknameCtrl.dispose();
+      _emailCtrl.dispose();
+      _townCtrl.dispose();
+      _occupationCtrl.dispose();
+      _hobbiesCtrl.dispose();
+    }
     super.dispose();
   }
 
@@ -79,33 +115,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _save() async {
-    if (!(_formKey.currentState?.validate() ?? false)) {
-      return;
-    }
+    if (!(_formKey.currentState?.validate() ?? false)) return;
     if (_draft.interestedIn.isEmpty) {
       _showSnack('Please select who you are interested in meeting.');
       return;
     }
     setState(() => _saving = true);
-    await Future.delayed(600.ms); // Simulate network call
-    // Commit to the global singleton
-    currentUser
-      ..nickname = _draft.nickname
-      ..email = _draft.email
-      ..age = _draft.age
-      ..gender = _draft.gender
-      ..town = _draft.town
-      ..interestedIn = List.from(_draft.interestedIn)
-      ..occupation = _draft.occupation
-      ..hobbies = _draft.hobbies
-      ..maritalStatus = _draft.maritalStatus
-      ..avatarStyle = _draft.avatarStyle
-      ..avatarSeed = _draft.avatarSeed;
-    setState(() {
-      _saving = false;
-      _editing = false;
-    });
-    _showSnack('Profile saved \u2728');
+    try {
+      final uid = UserProfileService.instance.currentUid;
+      await UserProfileService.instance.updateProfile(
+        uid: uid,
+        profile: _draft,
+      );
+      // Commit the draft back as the live profile.
+      setState(() {
+        _profile = _draft.copyWith(
+          interestedIn: List.from(_draft.interestedIn),
+        );
+        _editing = false;
+      });
+      _showSnack('Profile saved ✨');
+    } catch (_) {
+      _showSnack('Could not save. Please try again.');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   void _showSnack(String msg) {
@@ -139,6 +173,49 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // ── Loading state ───────────────────────────────────────────────────────
+    if (_profile == null && !_loadError) {
+      return const Scaffold(
+        backgroundColor: VailColors.mist,
+        body: Center(child: CircularProgressIndicator(color: VailColors.rose)),
+      );
+    }
+
+    // ── Error state ─────────────────────────────────────────────────────────
+    if (_loadError) {
+      return Scaffold(
+        backgroundColor: VailColors.mist,
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.cloud_off_rounded,
+                size: 48,
+                color: VailColors.inkLight,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Could not load your profile.',
+                style: GoogleFonts.inter(
+                  fontSize: 15,
+                  color: VailColors.inkLight,
+                ),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: () {
+                  setState(() => _loadError = false);
+                  _loadProfile();
+                },
+                child: const Text('Retry'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: VailColors.mist,
       body: Stack(
@@ -334,7 +411,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         const SizedBox(height: 12),
         Text(
-          currentUser.nickname,
+          _profile!.nickname,
           style: GoogleFonts.playfairDisplay(
             fontSize: 22,
             fontWeight: FontWeight.w700,
@@ -352,7 +429,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             const SizedBox(width: 3),
             Text(
-              currentUser.town,
+              _profile!.town,
               style: GoogleFonts.inter(fontSize: 13, color: Colors.white54),
             ),
           ],
@@ -395,6 +472,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   // ── View mode ───────────────────────────────────────────────────────────────
   Widget _buildViewMode() {
+    final p = _profile!;
     return Column(
       children: [
         _InfoCard(
@@ -403,22 +481,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
             _InfoRow(
               icon: Icons.cake_outlined,
               label: 'Age',
-              value: '${currentUser.age}',
+              value: '${p.age}',
             ),
             _InfoRow(
               icon: Icons.person_outline_rounded,
               label: 'I am a',
-              value: currentUser.gender,
+              value: p.gender,
             ),
             _InfoRow(
               icon: Icons.location_on_outlined,
               label: 'Town',
-              value: currentUser.town,
+              value: p.town,
             ),
             _InfoRow(
               icon: Icons.favorite_outline_rounded,
               label: 'Looking to meet',
-              value: currentUser.interestedIn.join(', '),
+              value: p.interestedIn.join(', '),
             ),
           ],
         ).animate(delay: 200.ms).fadeIn(duration: 300.ms).slideY(begin: 0.05),
@@ -428,23 +506,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _InfoCard(
           title: 'More About Me',
           rows: [
-            if (currentUser.occupation.isNotEmpty)
+            if (p.occupation.isNotEmpty)
               _InfoRow(
                 icon: Icons.work_outline_rounded,
                 label: 'Occupation',
-                value: currentUser.occupation,
+                value: p.occupation,
               ),
-            if (currentUser.hobbies.isNotEmpty)
+            if (p.hobbies.isNotEmpty)
               _InfoRow(
                 icon: Icons.star_outline_rounded,
                 label: 'Hobbies',
-                value: currentUser.hobbies,
+                value: p.hobbies,
               ),
-            if (currentUser.maritalStatus.isNotEmpty)
+            if (p.maritalStatus.isNotEmpty)
               _InfoRow(
                 icon: Icons.volunteer_activism_outlined,
                 label: 'Status',
-                value: currentUser.maritalStatus,
+                value: p.maritalStatus,
               ),
           ],
           emptyLabel: 'No optional info added yet.',
@@ -458,7 +536,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             _InfoRow(
               icon: Icons.mail_outline_rounded,
               label: 'Email',
-              value: currentUser.email,
+              value: p.email,
             ),
           ],
         ).animate(delay: 310.ms).fadeIn(duration: 300.ms).slideY(begin: 0.05),
