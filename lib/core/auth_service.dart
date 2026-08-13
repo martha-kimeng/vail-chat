@@ -1,4 +1,5 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'notification_service.dart';
 import 'presence_service.dart';
 
 /// Thin wrapper around FirebaseAuth — keeps auth logic out of the UI layer.
@@ -28,6 +29,8 @@ class AuthService {
     final uid = credential.user?.uid;
     if (uid != null) {
       await PresenceService.instance.goOnline(uid);
+      // Persist the current FCM token so Cloud Functions can reach this device.
+      await NotificationService.instance.saveTokenForUser(uid);
     }
     return credential;
   }
@@ -46,6 +49,8 @@ class AuthService {
     final uid = credential.user?.uid;
     if (uid != null) {
       await PresenceService.instance.goOnline(uid);
+      // Persist the current FCM token so Cloud Functions can reach this device.
+      await NotificationService.instance.saveTokenForUser(uid);
     }
     return credential;
   }

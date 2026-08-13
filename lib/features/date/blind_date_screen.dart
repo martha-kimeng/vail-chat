@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../core/conversation_service.dart';
+import '../../core/date_service.dart';
 import '../../core/theme.dart';
 
 class BlindDateScreen extends StatefulWidget {
@@ -19,9 +21,138 @@ class _BlindDateScreenState extends State<BlindDateScreen> {
   DateTime? _selectedDate;
   TimeOfDay? _selectedTime;
   bool _confirmed = false;
+  bool _submitting = false;
+
+  // Loaded from Firestore on init.
+  List<String> _participants = [];
+  bool _loadingParticipants = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadParticipants();
+    _checkExistingProposal();
+  }
+
+  // ── Load conversation participants ────────────────────────────────────────
+
+  Future<void> _loadParticipants() async {
+    try {
+      final doc = await ConversationService.instance.fetchConversation(
+        widget.conversationId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _participants = doc?.participants ?? [];
+        _loadingParticipants = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loadingParticipants = false);
+    }
+  }
+
+  // ── If a proposal already exists, jump to confirmed view ─────────────────
+
+  Future<void> _checkExistingProposal() async {
+    DateService.instance.proposalStream(widget.conversationId).listen((
+      proposal,
+    ) {
+      if (!mounted || _confirmed) return;
+      if (proposal != null) {
+        // Map Firestore DateType back to the screen's _DateType.
+        setState(() {
+          _selectedType = _fromServiceType(proposal.dateType);
+          _selectedDate = proposal.proposedDate;
+          _selectedTime = _parseTime(proposal.proposedTime);
+          _confirmed = true;
+        });
+      }
+    });
+  }
+
+  // ── Submit proposal to Firestore ──────────────────────────────────────────
+
+  Future<void> _submitProposal() async {
+    if (_selectedType == null ||
+        _selectedDate == null ||
+        _selectedTime == null) {
+      return;
+    }
+    setState(() => _submitting = true);
+    try {
+      final timeStr =
+          '${_selectedTime!.hour.toString().padLeft(2, '0')}:${_selectedTime!.minute.toString().padLeft(2, '0')}';
+      await DateService.instance.createProposal(
+        conversationId: widget.conversationId,
+        participants: _participants,
+        dateType: _toServiceType(_selectedType!),
+        proposedDate: _selectedDate!,
+        proposedTime: timeStr,
+      );
+      if (mounted) setState(() => _confirmed = true);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Could not send proposal. Please try again.',
+              style: GoogleFonts.inter(fontSize: 14),
+            ),
+            backgroundColor: VailColors.rose,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  // ── Type conversion helpers ───────────────────────────────────────────────
+
+  DateType _toServiceType(_DateType t) => switch (t) {
+    _DateType.coffee => DateType.coffee,
+    _DateType.dinner => DateType.dinner,
+    _DateType.walk => DateType.walk,
+    _DateType.activity => DateType.activity,
+  };
+
+  _DateType _fromServiceType(DateType t) => switch (t) {
+    DateType.coffee => _DateType.coffee,
+    DateType.dinner => _DateType.dinner,
+    DateType.walk => _DateType.walk,
+    DateType.activity => _DateType.activity,
+  };
+
+  TimeOfDay _parseTime(String timeStr) {
+    final parts = timeStr.split(':');
+    if (parts.length != 2) return const TimeOfDay(hour: 19, minute: 0);
+    return TimeOfDay(
+      hour: int.tryParse(parts[0]) ?? 19,
+      minute: int.tryParse(parts[1]) ?? 0,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
+    // While loading participants, show a simple spinner so the gradient
+    // background is still visible.
+    if (_loadingParticipants) {
+      return Scaffold(
+        body: Stack(
+          children: [
+            const VailGradientBackground(child: SizedBox.expand()),
+            const Center(
+              child: CircularProgressIndicator(color: Colors.white54),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Scaffold(
       body: Stack(
         children: [
@@ -112,8 +243,8 @@ class _BlindDateScreenState extends State<BlindDateScreen> {
                               dateType: _selectedType!,
                               date: _selectedDate!,
                               time: _selectedTime!,
-                              onConfirm: () =>
-                                  setState(() => _confirmed = true),
+                              submitting: _submitting,
+                              onConfirm: _submitProposal,
                             ),
                           },
                   ),
@@ -537,11 +668,13 @@ class _ReviewStep extends StatelessWidget {
     required this.date,
     required this.time,
     required this.onConfirm,
+    this.submitting = false,
   });
   final _DateType dateType;
   final DateTime date;
   final TimeOfDay time;
   final VoidCallback onConfirm;
+  final bool submitting;
 
   String get _typeLabel {
     return switch (dateType) {
@@ -609,7 +742,7 @@ class _ReviewStep extends StatelessWidget {
           ).animate(delay: 150.ms).fadeIn().slideY(begin: 0.06),
           const Spacer(),
           ElevatedButton(
-            onPressed: onConfirm,
+            onPressed: submitting ? null : onConfirm,
             style: ElevatedButton.styleFrom(
               backgroundColor: VailColors.rose,
               minimumSize: const Size(double.infinity, 56),
@@ -618,14 +751,23 @@ class _ReviewStep extends StatelessWidget {
               ),
               elevation: 0,
             ),
-            child: Text(
-              'Send the proposal 💌',
-              style: GoogleFonts.inter(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: Colors.white,
-              ),
-            ),
+            child: submitting
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : Text(
+                    'Send the proposal 💌',
+                    style: GoogleFonts.inter(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
+                  ),
           ).animate(delay: 250.ms).fadeIn(),
         ],
       ),
