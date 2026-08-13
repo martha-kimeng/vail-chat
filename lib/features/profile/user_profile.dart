@@ -79,7 +79,7 @@ final currentUser = UserProfile(
   lastName: 'Fox',
   age: 26,
   gender: 'Woman',
-  town: 'Cape Town',
+  town: 'Yaoundé',
   interestedIn: ['Men', 'Women'],
   occupation: 'UX Designer',
   hobbies: 'Hiking, Jazz, Reading',

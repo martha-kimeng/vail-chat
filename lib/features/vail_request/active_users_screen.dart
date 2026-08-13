@@ -35,12 +35,63 @@ class _ActiveUsersScreenState extends State<ActiveUsersScreen> {
 
   static const _locations = [
     'Any',
-    'Cape Town',
-    'Johannesburg',
-    'Durban',
-    'Pretoria',
-    'George',
-    'Port Elizabeth',
+    // Littoral
+    'Douala',
+    'Nkongsamba',
+    'Edéa',
+    'Loum',
+    'Mbanga',
+    // Centre
+    'Yaoundé',
+    'Bafia',
+    'Mbalmayo',
+    'Obala',
+    'Nanga Eboko',
+    // West
+    'Bafoussam',
+    'Dschang',
+    'Mbouda',
+    'Foumban',
+    'Bafang',
+    'Bandjoun',
+    // Northwest
+    'Bamenda',
+    'Kumbo',
+    'Wum',
+    'Fundong',
+    'Nkambe',
+    // Southwest
+    'Buea',
+    'Limbe',
+    'Kumba',
+    'Mamfe',
+    'Tiko',
+    // Adamawa
+    'Ngaoundéré',
+    'Meiganga',
+    'Tibati',
+    'Banyo',
+    // North
+    'Garoua',
+    'Guider',
+    'Figuil',
+    'Tcholliré',
+    // Far North
+    'Maroua',
+    'Kousseri',
+    'Mora',
+    'Yagoua',
+    'Mokolo',
+    // South
+    'Ebolowa',
+    'Sangmélima',
+    'Kribi',
+    'Lolodorf',
+    // East
+    'Bertoua',
+    'Batouri',
+    'Abong-Mbang',
+    'Yokadouma',
   ];
 
   @override
@@ -671,28 +722,42 @@ class _FilterChipWidget<T> extends StatelessWidget {
               ),
             ),
             const Divider(height: 1),
-            ...items.map((item) {
-              final (v, l) = item;
-              final selected = v == value;
-              return ListTile(
-                title: Text(
-                  l,
-                  style: GoogleFonts.inter(
-                    fontSize: 15,
-                    fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-                    color: selected ? VailColors.rose : VailColors.ink,
-                  ),
+            Flexible(
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ...items.map((item) {
+                      final (v, l) = item;
+                      final selected = v == value;
+                      return ListTile(
+                        title: Text(
+                          l,
+                          style: GoogleFonts.inter(
+                            fontSize: 15,
+                            fontWeight: selected
+                                ? FontWeight.w600
+                                : FontWeight.w400,
+                            color: selected ? VailColors.rose : VailColors.ink,
+                          ),
+                        ),
+                        trailing: selected
+                            ? const Icon(
+                                Icons.check_rounded,
+                                color: VailColors.rose,
+                              )
+                            : null,
+                        onTap: () {
+                          onSelected(v);
+                          Navigator.pop(context);
+                        },
+                      );
+                    }),
+                    const SizedBox(height: 8),
+                  ],
                 ),
-                trailing: selected
-                    ? const Icon(Icons.check_rounded, color: VailColors.rose)
-                    : null,
-                onTap: () {
-                  onSelected(v);
-                  Navigator.pop(context);
-                },
-              );
-            }),
-            const SizedBox(height: 8),
+              ),
+            ),
           ],
         ),
       ),

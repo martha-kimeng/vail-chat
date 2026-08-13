@@ -532,7 +532,7 @@ class _Step2 extends StatelessWidget {
                 VailField(
                   controller: townCtrl,
                   label: 'TOWN / CITY',
-                  hint: 'e.g. Cape Town',
+                  hint: 'e.g. Douala',
                   icon: Icons.location_on_outlined,
                   validator: (v) => (v == null || v.trim().isEmpty)
                       ? 'Please enter your town'
