@@ -31,6 +31,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   // Text controllers (initialised from draft)
   late TextEditingController _nicknameCtrl;
+  late TextEditingController _firstNameCtrl;
+  late TextEditingController _lastNameCtrl;
   late TextEditingController _emailCtrl;
   late TextEditingController _townCtrl;
   late TextEditingController _occupationCtrl;
@@ -76,6 +78,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void _initDraft(UserProfile source) {
     _draft = source.copyWith(interestedIn: List.from(source.interestedIn));
     _nicknameCtrl = TextEditingController(text: _draft.nickname);
+    _firstNameCtrl = TextEditingController(text: _draft.firstName);
+    _lastNameCtrl = TextEditingController(text: _draft.lastName);
     _emailCtrl = TextEditingController(text: _draft.email);
     _townCtrl = TextEditingController(text: _draft.town);
     _occupationCtrl = TextEditingController(text: _draft.occupation);
@@ -85,6 +89,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void _resetDraft() {
     if (_profile == null) return;
     _nicknameCtrl.dispose();
+    _firstNameCtrl.dispose();
+    _lastNameCtrl.dispose();
     _emailCtrl.dispose();
     _townCtrl.dispose();
     _occupationCtrl.dispose();
@@ -97,6 +103,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     // Controllers may not be initialised if the profile never loaded.
     if (_profile != null) {
       _nicknameCtrl.dispose();
+      _firstNameCtrl.dispose();
+      _lastNameCtrl.dispose();
       _emailCtrl.dispose();
       _townCtrl.dispose();
       _occupationCtrl.dispose();
@@ -418,6 +426,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
             color: Colors.white,
           ),
         ).animate(delay: 100.ms).fadeIn().slideY(begin: 0.08),
+        const SizedBox(height: 2),
+        // Real name — shown if collected
+        if (_profile!.firstName.isNotEmpty || _profile!.lastName.isNotEmpty)
+          Text(
+            '${_profile!.firstName} ${_profile!.lastName}'.trim(),
+            style: GoogleFonts.inter(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: Colors.white70,
+            ),
+          ).animate(delay: 130.ms).fadeIn(),
         const SizedBox(height: 4),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -478,6 +497,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _InfoCard(
           title: 'About Me',
           rows: [
+            if (p.firstName.isNotEmpty || p.lastName.isNotEmpty)
+              _InfoRow(
+                icon: Icons.badge_outlined,
+                label: 'Real name',
+                value: '${p.firstName} ${p.lastName}'.trim(),
+              ),
             _InfoRow(
               icon: Icons.cake_outlined,
               label: 'Age',
@@ -564,6 +589,44 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ? 'At least 3 characters'
                       : null,
                   onChanged: (v) => _draft.nickname = v,
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: VailField(
+                        controller: _firstNameCtrl,
+                        label: 'FIRST NAME',
+                        hint: 'e.g. Alex',
+                        validator: (v) =>
+                            (v == null || v.trim().isEmpty) ? 'Required' : null,
+                        onChanged: (v) => _draft.firstName = v,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: VailField(
+                        controller: _lastNameCtrl,
+                        label: 'LAST NAME',
+                        hint: 'e.g. Smith',
+                        validator: (v) =>
+                            (v == null || v.trim().isEmpty) ? 'Required' : null,
+                        onChanged: (v) => _draft.lastName = v,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '🔒 Only revealed on mutual spark',
+                    style: GoogleFonts.inter(
+                      fontSize: 11,
+                      color: VailColors.inkLight,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 16),
                 VailField(

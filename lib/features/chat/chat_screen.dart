@@ -357,7 +357,7 @@ class _ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        'Anonymous',
+                        'Anonymous · identity hidden',
                         style: GoogleFonts.inter(
                           fontSize: 11,
                           color: VailColors.inkLight.withOpacity(0.6),
