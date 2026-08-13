@@ -43,6 +43,7 @@ class MessageDoc {
     required this.text,
     required this.sentAt,
     this.isSystem = false,
+    this.isSparkNotification = false,
   });
 
   final String id;
@@ -50,6 +51,10 @@ class MessageDoc {
   final String text;
   final DateTime sentAt;
   final bool isSystem;
+
+  /// True when this system message is a spark notification — the UI renders
+  /// it as a tappable card instead of a plain italic pill.
+  final bool isSparkNotification;
 }
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -88,49 +93,57 @@ class ConversationService {
         .orderBy('lastMessageAt', descending: true)
         .snapshots()
         .asyncMap((snap) async {
-      final docs = snap.docs.map(_fromSnap).toList();
-      // Collect all unique other-participant UIDs in one pass.
-      final otherUids = docs
-          .map((d) => d.participants.firstWhere((p) => p != uid,
-              orElse: () => ''))
-          .where((id) => id.isNotEmpty)
-          .toSet()
-          .toList();
+          final docs = snap.docs.map(_fromSnap).toList();
+          // Collect all unique other-participant UIDs in one pass.
+          final otherUids = docs
+              .map(
+                (d) => d.participants.firstWhere(
+                  (p) => p != uid,
+                  orElse: () => '',
+                ),
+              )
+              .where((id) => id.isNotEmpty)
+              .toSet()
+              .toList();
 
-      if (otherUids.isEmpty) return docs;
+          if (otherUids.isEmpty) return docs;
 
-      // Batch-fetch nicknames (Firestore `whereIn` supports up to 30 items).
-      final Map<String, String> aliases = {};
-      // Split into chunks of 30 just in case.
-      for (var i = 0; i < otherUids.length; i += 30) {
-        final chunk = otherUids.sublist(
-            i, i + 30 > otherUids.length ? otherUids.length : i + 30);
-        final userSnap = await _db
-            .collection('users')
-            .where(FieldPath.documentId, whereIn: chunk)
-            .get();
-        for (final doc in userSnap.docs) {
-          aliases[doc.id] =
-              (doc.data()['nickname'] as String?) ?? 'Stranger';
-        }
-      }
+          // Batch-fetch nicknames (Firestore `whereIn` supports up to 30 items).
+          final Map<String, String> aliases = {};
+          // Split into chunks of 30 just in case.
+          for (var i = 0; i < otherUids.length; i += 30) {
+            final chunk = otherUids.sublist(
+              i,
+              i + 30 > otherUids.length ? otherUids.length : i + 30,
+            );
+            final userSnap = await _db
+                .collection('users')
+                .where(FieldPath.documentId, whereIn: chunk)
+                .get();
+            for (final doc in userSnap.docs) {
+              aliases[doc.id] =
+                  (doc.data()['nickname'] as String?) ?? 'Stranger';
+            }
+          }
 
-      return docs.map((d) {
-        final otherId = d.participants.firstWhere((p) => p != uid,
-            orElse: () => '');
-        return ConversationDoc(
-          id: d.id,
-          participants: d.participants,
-          lastMessage: d.lastMessage,
-          lastMessageAt: d.lastMessageAt,
-          unreadCount: d.unreadCount,
-          mutualChemistry: d.mutualChemistry,
-          chemistrySignals: d.chemistrySignals,
-          createdAt: d.createdAt,
-          otherAlias: aliases[otherId] ?? 'Stranger',
-        );
-      }).toList();
-    });
+          return docs.map((d) {
+            final otherId = d.participants.firstWhere(
+              (p) => p != uid,
+              orElse: () => '',
+            );
+            return ConversationDoc(
+              id: d.id,
+              participants: d.participants,
+              lastMessage: d.lastMessage,
+              lastMessageAt: d.lastMessageAt,
+              unreadCount: d.unreadCount,
+              mutualChemistry: d.mutualChemistry,
+              chemistrySignals: d.chemistrySignals,
+              createdAt: d.createdAt,
+              otherAlias: aliases[otherId] ?? 'Stranger',
+            );
+          }).toList();
+        });
   }
 
   /// Stream filtered to conversations where [mutualChemistry] is true.
@@ -142,46 +155,54 @@ class ConversationService {
         .orderBy('lastMessageAt', descending: true)
         .snapshots()
         .asyncMap((snap) async {
-      final docs = snap.docs.map(_fromSnap).toList();
-      final otherUids = docs
-          .map((d) => d.participants.firstWhere((p) => p != uid,
-              orElse: () => ''))
-          .where((id) => id.isNotEmpty)
-          .toSet()
-          .toList();
+          final docs = snap.docs.map(_fromSnap).toList();
+          final otherUids = docs
+              .map(
+                (d) => d.participants.firstWhere(
+                  (p) => p != uid,
+                  orElse: () => '',
+                ),
+              )
+              .where((id) => id.isNotEmpty)
+              .toSet()
+              .toList();
 
-      if (otherUids.isEmpty) return docs;
+          if (otherUids.isEmpty) return docs;
 
-      final Map<String, String> aliases = {};
-      for (var i = 0; i < otherUids.length; i += 30) {
-        final chunk = otherUids.sublist(
-            i, i + 30 > otherUids.length ? otherUids.length : i + 30);
-        final userSnap = await _db
-            .collection('users')
-            .where(FieldPath.documentId, whereIn: chunk)
-            .get();
-        for (final doc in userSnap.docs) {
-          aliases[doc.id] =
-              (doc.data()['nickname'] as String?) ?? 'Stranger';
-        }
-      }
+          final Map<String, String> aliases = {};
+          for (var i = 0; i < otherUids.length; i += 30) {
+            final chunk = otherUids.sublist(
+              i,
+              i + 30 > otherUids.length ? otherUids.length : i + 30,
+            );
+            final userSnap = await _db
+                .collection('users')
+                .where(FieldPath.documentId, whereIn: chunk)
+                .get();
+            for (final doc in userSnap.docs) {
+              aliases[doc.id] =
+                  (doc.data()['nickname'] as String?) ?? 'Stranger';
+            }
+          }
 
-      return docs.map((d) {
-        final otherId = d.participants.firstWhere((p) => p != uid,
-            orElse: () => '');
-        return ConversationDoc(
-          id: d.id,
-          participants: d.participants,
-          lastMessage: d.lastMessage,
-          lastMessageAt: d.lastMessageAt,
-          unreadCount: d.unreadCount,
-          mutualChemistry: d.mutualChemistry,
-          chemistrySignals: d.chemistrySignals,
-          createdAt: d.createdAt,
-          otherAlias: aliases[otherId] ?? 'Stranger',
-        );
-      }).toList();
-    });
+          return docs.map((d) {
+            final otherId = d.participants.firstWhere(
+              (p) => p != uid,
+              orElse: () => '',
+            );
+            return ConversationDoc(
+              id: d.id,
+              participants: d.participants,
+              lastMessage: d.lastMessage,
+              lastMessageAt: d.lastMessageAt,
+              unreadCount: d.unreadCount,
+              mutualChemistry: d.mutualChemistry,
+              chemistrySignals: d.chemistrySignals,
+              createdAt: d.createdAt,
+              otherAlias: aliases[otherId] ?? 'Stranger',
+            );
+          }).toList();
+        });
   }
 
   /// One-shot fetch of a single conversation document.
@@ -246,9 +267,7 @@ class ConversationService {
   /// Call this when the user opens a chat screen.
   Future<void> markRead(String conversationId) async {
     final uid = _currentUid;
-    await _conversations.doc(conversationId).update({
-      'unreadCount.$uid': 0,
-    });
+    await _conversations.doc(conversationId).update({'unreadCount.$uid': 0});
   }
 
   // ── Chemistry / Spark signal ──────────────────────────────────────────────
@@ -262,15 +281,16 @@ class ConversationService {
     bool isMutual = false;
 
     await _db.runTransaction((txn) async {
-      final snap =
-          await txn.get(_conversations.doc(conversationId));
+      final snap = await txn.get(_conversations.doc(conversationId));
       if (!snap.exists) return;
 
       final data = snap.data()!;
       final signals = List<String>.from(
-          (data['chemistrySignals'] as List<dynamic>?) ?? []);
+        (data['chemistrySignals'] as List<dynamic>?) ?? [],
+      );
       final participants = List<String>.from(
-          (data['participants'] as List<dynamic>?) ?? []);
+        (data['participants'] as List<dynamic>?) ?? [],
+      );
 
       // Idempotent — don't double-add.
       if (!signals.contains(uid)) signals.add(uid);
@@ -286,33 +306,74 @@ class ConversationService {
     return isMutual;
   }
 
+  /// Writes a system message into the conversation notifying the OTHER
+  /// participant that they have been sent a spark.
+  ///
+  /// The message carries [isSystem: true] and [isSparkNotification: true]
+  /// so the chat UI can render it as a tappable spark card rather than a
+  /// plain system pill.
+  Future<void> sendSparkNotification({
+    required String conversationId,
+    required List<String> participants,
+  }) async {
+    final uid = _currentUid;
+    final msgRef = _messages(conversationId).doc();
+    final convoRef = _conversations.doc(conversationId);
+
+    // Increment unread for the OTHER participant only.
+    final unreadUpdate = <String, dynamic>{};
+    for (final p in participants) {
+      if (p != uid) {
+        unreadUpdate['unreadCount.$p'] = FieldValue.increment(1);
+      }
+    }
+
+    final batch = _db.batch();
+
+    batch.set(msgRef, {
+      'senderId': uid,
+      'text': '💫 Someone sent you a spark! Tap to send yours back.',
+      'sentAt': FieldValue.serverTimestamp(),
+      'isSystem': true,
+      'isSparkNotification': true,
+    });
+
+    batch.update(convoRef, {
+      'lastMessage': '💫 Someone sent you a spark!',
+      'lastMessageAt': FieldValue.serverTimestamp(),
+      ...unreadUpdate,
+    });
+
+    await batch.commit();
+  }
+
   // ── Serialisation ─────────────────────────────────────────────────────────
 
-  ConversationDoc _fromSnap(
-      DocumentSnapshot<Map<String, dynamic>> snap) {
+  ConversationDoc _fromSnap(DocumentSnapshot<Map<String, dynamic>> snap) {
     final d = snap.data()!;
     final rawUnread = (d['unreadCount'] as Map<dynamic, dynamic>?) ?? {};
-    final unread =
-        rawUnread.map((k, v) => MapEntry(k.toString(), (v as int?) ?? 0));
+    final unread = rawUnread.map(
+      (k, v) => MapEntry(k.toString(), (v as int?) ?? 0),
+    );
 
     return ConversationDoc(
       id: snap.id,
       participants: List<String>.from(
-          (d['participants'] as List<dynamic>?) ?? []),
+        (d['participants'] as List<dynamic>?) ?? [],
+      ),
       lastMessage: (d['lastMessage'] as String?) ?? '',
       lastMessageAt:
           (d['lastMessageAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       unreadCount: unread,
       mutualChemistry: (d['mutualChemistry'] as bool?) ?? false,
       chemistrySignals: List<String>.from(
-          (d['chemistrySignals'] as List<dynamic>?) ?? []),
-      createdAt:
-          (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+        (d['chemistrySignals'] as List<dynamic>?) ?? [],
+      ),
+      createdAt: (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );
   }
 
-  MessageDoc _messageFromSnap(
-      DocumentSnapshot<Map<String, dynamic>> snap) {
+  MessageDoc _messageFromSnap(DocumentSnapshot<Map<String, dynamic>> snap) {
     final d = snap.data()!;
     return MessageDoc(
       id: snap.id,
@@ -320,6 +381,7 @@ class ConversationService {
       text: (d['text'] as String?) ?? '',
       sentAt: (d['sentAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       isSystem: (d['isSystem'] as bool?) ?? false,
+      isSparkNotification: (d['isSparkNotification'] as bool?) ?? false,
     );
   }
 }

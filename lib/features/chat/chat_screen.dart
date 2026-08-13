@@ -17,12 +17,14 @@ class _Message {
     required this.sender,
     required this.time,
     this.isSystem = false,
+    this.isSparkNotification = false,
   });
 
   final String text;
   final _Sender sender;
   final String time;
   final bool isSystem;
+  final bool isSparkNotification;
 }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
@@ -124,6 +126,17 @@ class _ChatScreenState extends State<ChatScreen> {
       final isMutual = await ConversationService.instance.signalChemistry(
         widget.conversationId,
       );
+
+      // Notify the other participant with a system message.
+      // We do this regardless of mutual status — if mutual, both parties
+      // already navigated to the reveal screen, so the message acts as a
+      // record in the thread either way.
+      final participants = _conversation?.participants ?? [_uid];
+      await ConversationService.instance.sendSparkNotification(
+        conversationId: widget.conversationId,
+        participants: participants,
+      );
+
       if (!mounted) return;
       setState(() {
         _chemistrySignalled = true;
@@ -148,6 +161,7 @@ class _ChatScreenState extends State<ChatScreen> {
         sender: _Sender.other,
         time: time,
         isSystem: true,
+        isSparkNotification: m.isSparkNotification,
       );
     }
     return _Message(
@@ -244,7 +258,10 @@ class _ChatScreenState extends State<ChatScreen> {
                   itemCount: messages.length,
                   itemBuilder: (context, i) {
                     final msg = messages[i];
-                    return _MessageBubble(message: msg)
+                    return _MessageBubble(
+                          message: msg,
+                          onSparkTap: _onChemistryTap,
+                        )
                         .animate(delay: (i * 40).ms)
                         .fadeIn(duration: 250.ms)
                         .slideY(begin: 0.05);
@@ -413,11 +430,64 @@ class _ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
 
 // ─── Message bubble ───────────────────────────────────────────────────────────
 class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({required this.message});
+  const _MessageBubble({required this.message, required this.onSparkTap});
   final _Message message;
+  final VoidCallback onSparkTap;
 
   @override
   Widget build(BuildContext context) {
+    // Spark notification — tappable card with a CTA to send spark back.
+    if (message.isSystem && message.isSparkNotification) {
+      return GestureDetector(
+        onTap: onSparkTap,
+        child: Center(
+          child: Container(
+            margin: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  VailColors.rose.withOpacity(0.12),
+                  VailColors.rose.withOpacity(0.06),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: VailColors.rose.withOpacity(0.3)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.favorite_rounded,
+                  color: VailColors.rose,
+                  size: 28,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '✨ Someone sent you a spark!',
+                  style: GoogleFonts.inter(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: VailColors.ink,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Tap to send yours back',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: VailColors.rose,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Plain system message (e.g. conversation start events).
     if (message.isSystem) {
       return Center(
         child: Container(

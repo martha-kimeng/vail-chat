@@ -6,6 +6,8 @@ class UserProfile {
   UserProfile({
     required this.nickname,
     required this.email,
+    required this.firstName,
+    required this.lastName,
     required this.age,
     required this.gender,
     required this.town,
@@ -19,6 +21,8 @@ class UserProfile {
 
   String nickname;
   String email;
+  String firstName;
+  String lastName;
   int age;
   String gender;
   String town;
@@ -27,7 +31,7 @@ class UserProfile {
   String hobbies;
   String maritalStatus;
   String avatarStyle; // DiceBear style slug
-  String avatarSeed;  // DiceBear seed string
+  String avatarSeed; // DiceBear seed string
 
   /// Constructs the DiceBear SVG URL for this profile's avatar.
   String get avatarUrl =>
@@ -37,6 +41,8 @@ class UserProfile {
   UserProfile copyWith({
     String? nickname,
     String? email,
+    String? firstName,
+    String? lastName,
     int? age,
     String? gender,
     String? town,
@@ -50,6 +56,8 @@ class UserProfile {
     return UserProfile(
       nickname: nickname ?? this.nickname,
       email: email ?? this.email,
+      firstName: firstName ?? this.firstName,
+      lastName: lastName ?? this.lastName,
       age: age ?? this.age,
       gender: gender ?? this.gender,
       town: town ?? this.town,
@@ -67,6 +75,8 @@ class UserProfile {
 final currentUser = UserProfile(
   nickname: 'MidnightFox',
   email: 'you@example.com',
+  firstName: 'Midnight',
+  lastName: 'Fox',
   age: 26,
   gender: 'Woman',
   town: 'Cape Town',

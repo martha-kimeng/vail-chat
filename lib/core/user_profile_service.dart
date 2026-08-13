@@ -43,6 +43,8 @@ class UserProfileService {
     await _userDoc(uid).update({
       'nickname': profile.nickname,
       'email': profile.email,
+      'firstName': profile.firstName,
+      'lastName': profile.lastName,
       'age': profile.age,
       'gender': profile.gender,
       'town': profile.town,
@@ -86,6 +88,8 @@ class UserProfileService {
       'uid': uid,
       'nickname': p.nickname,
       'email': p.email,
+      'firstName': p.firstName,
+      'lastName': p.lastName,
       'age': p.age,
       'gender': p.gender,
       'town': p.town,
@@ -104,6 +108,8 @@ class UserProfileService {
     return UserProfile(
       nickname: (data['nickname'] as String?) ?? '',
       email: (data['email'] as String?) ?? '',
+      firstName: (data['firstName'] as String?) ?? '',
+      lastName: (data['lastName'] as String?) ?? '',
       age: (data['age'] as int?) ?? 18,
       gender: (data['gender'] as String?) ?? '',
       town: (data['town'] as String?) ?? '',

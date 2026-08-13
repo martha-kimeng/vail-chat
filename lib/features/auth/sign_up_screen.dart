@@ -26,6 +26,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
   // Step 1
   final _nicknameCtrl = TextEditingController();
+  final _firstNameCtrl = TextEditingController();
+  final _lastNameCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
   bool _obscure = true;
@@ -56,6 +58,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
   @override
   void dispose() {
     _nicknameCtrl.dispose();
+    _firstNameCtrl.dispose();
+    _lastNameCtrl.dispose();
     _emailCtrl.dispose();
     _passwordCtrl.dispose();
     _townCtrl.dispose();
@@ -97,6 +101,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
       final profile = UserProfile(
         nickname: _nicknameCtrl.text.trim(),
         email: _emailCtrl.text.trim(),
+        firstName: _firstNameCtrl.text.trim(),
+        lastName: _lastNameCtrl.text.trim(),
         age: _age!,
         gender: _gender!,
         town: _townCtrl.text.trim(),
@@ -173,6 +179,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
                         key: const ValueKey(1),
                         formKey: _step1Key,
                         nicknameCtrl: _nicknameCtrl,
+                        firstNameCtrl: _firstNameCtrl,
+                        lastNameCtrl: _lastNameCtrl,
                         emailCtrl: _emailCtrl,
                         passwordCtrl: _passwordCtrl,
                         obscure: _obscure,
@@ -222,6 +230,8 @@ class _Step1 extends StatelessWidget {
     super.key,
     required this.formKey,
     required this.nicknameCtrl,
+    required this.firstNameCtrl,
+    required this.lastNameCtrl,
     required this.emailCtrl,
     required this.passwordCtrl,
     required this.obscure,
@@ -231,6 +241,8 @@ class _Step1 extends StatelessWidget {
 
   final GlobalKey<FormState> formKey;
   final TextEditingController nicknameCtrl;
+  final TextEditingController firstNameCtrl;
+  final TextEditingController lastNameCtrl;
   final TextEditingController emailCtrl;
   final TextEditingController passwordCtrl;
   final bool obscure;
@@ -265,7 +277,7 @@ class _Step1 extends StatelessWidget {
         ).animate().fadeIn(duration: 400.ms).slideY(begin: 0.1),
         const SizedBox(height: 8),
         Text(
-          'Pick a nickname — no real name needed.',
+          'Pick a nickname — your real name stays private until you spark.',
           style: GoogleFonts.inter(
             fontSize: 14,
             color: Colors.white60,
@@ -283,6 +295,45 @@ class _Step1 extends StatelessWidget {
             key: formKey,
             child: Column(
               children: [
+                // Real name row — revealed only on mutual spark
+                Row(
+                  children: [
+                    Expanded(
+                      child: VailField(
+                        controller: firstNameCtrl,
+                        label: 'FIRST NAME',
+                        hint: 'e.g. Alex',
+                        icon: Icons.badge_outlined,
+                        validator: (v) =>
+                            (v == null || v.trim().isEmpty) ? 'Required' : null,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: VailField(
+                        controller: lastNameCtrl,
+                        label: 'LAST NAME',
+                        hint: 'e.g. Smith',
+                        icon: Icons.badge_outlined,
+                        validator: (v) =>
+                            (v == null || v.trim().isEmpty) ? 'Required' : null,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '🔒 Only revealed if both of you spark',
+                    style: GoogleFonts.inter(
+                      fontSize: 11,
+                      color: VailColors.inkLight,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
                 VailField(
                   controller: nicknameCtrl,
                   label: 'NICKNAME',

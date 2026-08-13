@@ -309,28 +309,32 @@ class _HomeHeader extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
-          // Tab pills
-          Row(
-            children: [
-              _TabPill(
-                label: 'Chats',
-                active: tabIndex == 0,
-                onTap: () => onTabChanged(0),
-              ),
-              const SizedBox(width: 8),
-              _TabPill(
-                label: 'Chemistry ✨',
-                active: tabIndex == 1,
-                onTap: () => onTabChanged(1),
-              ),
-              const SizedBox(width: 8),
-              _TabPill(
-                label: 'Vail Requests',
-                active: tabIndex == 2,
-                onTap: () => onTabChanged(2),
-                badge: pendingVailCount,
-              ),
-            ],
+          // Tab pills — scrollable so no tab is ever clipped on narrow screens.
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.only(bottom: 2),
+            child: Row(
+              children: [
+                _TabPill(
+                  label: 'Chats',
+                  active: tabIndex == 0,
+                  onTap: () => onTabChanged(0),
+                ),
+                const SizedBox(width: 8),
+                _TabPill(
+                  label: 'Chemistry ✨',
+                  active: tabIndex == 1,
+                  onTap: () => onTabChanged(1),
+                ),
+                const SizedBox(width: 8),
+                _TabPill(
+                  label: 'Vail Requests',
+                  active: tabIndex == 2,
+                  onTap: () => onTabChanged(2),
+                  badge: pendingVailCount,
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 4),
         ],
