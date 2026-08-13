@@ -9,7 +9,7 @@ class VailField extends StatelessWidget {
     required this.controller,
     required this.label,
     required this.hint,
-    required this.icon,
+    this.icon,
     this.obscure = false,
     this.suffixIcon,
     this.keyboardType,
@@ -20,7 +20,7 @@ class VailField extends StatelessWidget {
   final TextEditingController controller;
   final String label;
   final String hint;
-  final IconData icon;
+  final IconData? icon;
   final bool obscure;
   final Widget? suffixIcon;
   final TextInputType? keyboardType;
@@ -51,7 +51,9 @@ class VailField extends StatelessWidget {
           style: GoogleFonts.inter(fontSize: 15, color: VailColors.ink),
           decoration: InputDecoration(
             hintText: hint,
-            prefixIcon: Icon(icon, color: VailColors.inkLight, size: 20),
+            prefixIcon: icon != null
+                ? Icon(icon, color: VailColors.inkLight, size: 20)
+                : null,
             suffixIcon: suffixIcon,
           ),
         ),

@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:go_router/go_router.dart';
 import '../core/auth_service.dart';
+import '../features/splash/splash_screen.dart';
 import '../features/onboarding/onboarding_screen.dart';
 import '../features/auth/sign_up_screen.dart';
 import '../features/auth/sign_in_screen.dart';
@@ -14,15 +15,23 @@ import '../features/vail_request/incoming_vail_requests_screen.dart';
 import '../features/profile/profile_screen.dart';
 
 /// Routes that are accessible without being signed in.
-const _publicRoutes = {'/sign-in', '/sign-up', '/onboarding'};
+/// Splash and onboarding are also public.
+const _publicRoutes = {'/splash', '/sign-in', '/sign-up', '/onboarding'};
 
 final appRouter = GoRouter(
-  initialLocation: '/sign-in',
+  initialLocation: '/splash',
   // Rebuild the router whenever auth state changes so the redirect fires.
   refreshListenable: _AuthNotifier(),
   redirect: (context, state) {
     final signedIn = AuthService.instance.currentUser != null;
     final isPublic = _publicRoutes.contains(state.matchedLocation);
+
+    // Never redirect away from splash or onboarding — they handle their own
+    // navigation after completing their sequences.
+    if (state.matchedLocation == '/splash' ||
+        state.matchedLocation == '/onboarding') {
+      return null;
+    }
 
     // Signed-in user trying to reach a public page → send to home.
     if (signedIn && isPublic) return '/home';
@@ -34,6 +43,7 @@ final appRouter = GoRouter(
     return null;
   },
   routes: [
+    GoRoute(path: '/splash', builder: (context, state) => const SplashScreen()),
     GoRoute(
       path: '/onboarding',
       builder: (context, state) => const OnboardingScreen(),

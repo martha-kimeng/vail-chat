@@ -303,7 +303,6 @@ class _Step1 extends StatelessWidget {
                         controller: firstNameCtrl,
                         label: 'FIRST NAME',
                         hint: 'e.g. Alex',
-                        icon: Icons.badge_outlined,
                         validator: (v) =>
                             (v == null || v.trim().isEmpty) ? 'Required' : null,
                       ),
@@ -314,7 +313,6 @@ class _Step1 extends StatelessWidget {
                         controller: lastNameCtrl,
                         label: 'LAST NAME',
                         hint: 'e.g. Smith',
-                        icon: Icons.badge_outlined,
                         validator: (v) =>
                             (v == null || v.trim().isEmpty) ? 'Required' : null,
                       ),
