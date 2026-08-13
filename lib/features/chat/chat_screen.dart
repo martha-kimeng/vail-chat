@@ -205,7 +205,8 @@ class _ChatScreenState extends State<ChatScreen> {
     if (m.isSystem) {
       return _Message(
         text: m.text,
-        sender: _Sender.other,
+        // Use the real senderId so the spark card can tell sender from receiver.
+        sender: m.senderId == _uid ? _Sender.me : _Sender.other,
         time: time,
         isSystem: true,
         isSparkNotification: m.isSparkNotification,
