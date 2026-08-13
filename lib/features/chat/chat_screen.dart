@@ -4,6 +4,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/conversation_service.dart';
+import '../../core/date_service.dart';
 import '../../core/theme.dart';
 
 // ─── Internal display model ───────────────────────────────────────────────────
@@ -18,6 +19,10 @@ class _Message {
     required this.time,
     this.isSystem = false,
     this.isSparkNotification = false,
+    this.isUnspark = false,
+    this.isDateProposal = false,
+    this.dateProposalId,
+    this.dateDetails,
   });
 
   final String text;
@@ -25,6 +30,10 @@ class _Message {
   final String time;
   final bool isSystem;
   final bool isSparkNotification;
+  final bool isUnspark;
+  final bool isDateProposal;
+  final String? dateProposalId;
+  final String? dateDetails;
 }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
@@ -44,6 +53,7 @@ class _ChatScreenState extends State<ChatScreen> {
   ConversationDoc? _conversation;
   bool _chemistrySignalled = false;
   bool _sendingChemistry = false;
+  bool _unsparkingChemistry = false;
 
   final String _uid = FirebaseAuth.instance.currentUser?.uid ?? '';
 
@@ -106,18 +116,55 @@ class _ChatScreenState extends State<ChatScreen> {
   // ── Chemistry / Spark ─────────────────────────────────────────────────────
 
   void _onChemistryTap() {
-    if (_chemistrySignalled || _sendingChemistry) return;
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _ChemistrySheet(
-        onConfirm: () async {
-          Navigator.pop(context);
-          await _signalChemistry();
-        },
-        onCancel: () => Navigator.pop(context),
-      ),
-    );
+    if (_sendingChemistry || _unsparkingChemistry) return;
+
+    if (_chemistrySignalled) {
+      // Already sparked — offer to unspark.
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: Colors.transparent,
+        builder: (_) => _UnsparkSheet(
+          onConfirm: () async {
+            Navigator.pop(context);
+            await _unsignalChemistry();
+          },
+          onCancel: () => Navigator.pop(context),
+        ),
+      );
+    } else {
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: Colors.transparent,
+        builder: (_) => _ChemistrySheet(
+          onConfirm: () async {
+            Navigator.pop(context);
+            await _signalChemistry();
+          },
+          onCancel: () => Navigator.pop(context),
+        ),
+      );
+    }
+  }
+
+  Future<void> _unsignalChemistry() async {
+    setState(() => _unsparkingChemistry = true);
+    try {
+      await ConversationService.instance.unsignalChemistry(
+        widget.conversationId,
+      );
+      final participants = _conversation?.participants ?? [_uid];
+      await ConversationService.instance.sendUnsparkNotification(
+        conversationId: widget.conversationId,
+        participants: participants,
+      );
+      if (!mounted) return;
+      setState(() {
+        _chemistrySignalled = false;
+        _unsparkingChemistry = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _unsparkingChemistry = false);
+    }
   }
 
   Future<void> _signalChemistry() async {
@@ -162,6 +209,10 @@ class _ChatScreenState extends State<ChatScreen> {
         time: time,
         isSystem: true,
         isSparkNotification: m.isSparkNotification,
+        isUnspark: m.isUnspark,
+        isDateProposal: m.isDateProposal,
+        dateProposalId: m.dateProposalId,
+        dateDetails: m.dateDetails,
       );
     }
     return _Message(
@@ -192,7 +243,7 @@ class _ChatScreenState extends State<ChatScreen> {
       appBar: _ChatAppBar(
         alias: alias,
         chemistrySignalled: _chemistrySignalled,
-        sendingChemistry: _sendingChemistry,
+        sendingChemistry: _sendingChemistry || _unsparkingChemistry,
         onChemistryTap: _onChemistryTap,
         onBackTap: () => context.go('/home'),
       ),
@@ -261,6 +312,8 @@ class _ChatScreenState extends State<ChatScreen> {
                     return _MessageBubble(
                           message: msg,
                           onSparkTap: _onChemistryTap,
+                          conversationId: widget.conversationId,
+                          currentUid: _uid,
                         )
                         .animate(delay: (i * 40).ms)
                         .fadeIn(duration: 250.ms)
@@ -370,9 +423,7 @@ class _ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
             ),
             // Chemistry button
             GestureDetector(
-              onTap: (chemistrySignalled || sendingChemistry)
-                  ? null
-                  : onChemistryTap,
+              onTap: sendingChemistry ? null : onChemistryTap,
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 300),
                 padding: const EdgeInsets.symmetric(
@@ -430,16 +481,26 @@ class _ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
 
 // ─── Message bubble ───────────────────────────────────────────────────────────
 class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({required this.message, required this.onSparkTap});
+  const _MessageBubble({
+    required this.message,
+    required this.onSparkTap,
+    required this.conversationId,
+    required this.currentUid,
+  });
   final _Message message;
   final VoidCallback onSparkTap;
+  final String conversationId;
+  final String currentUid;
 
   @override
   Widget build(BuildContext context) {
-    // Spark notification — tappable card with a CTA to send spark back.
+    // ── Spark notification card ─────────────────────────────────────────────
     if (message.isSystem && message.isSparkNotification) {
+      // The sender sees a confirmation; the receiver sees a prompt to respond.
+      final isSender = message.sender == _Sender.me;
+
       return GestureDetector(
-        onTap: onSparkTap,
+        onTap: isSender ? null : onSparkTap,
         child: Center(
           child: Container(
             margin: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
@@ -447,24 +508,30 @@ class _MessageBubble extends StatelessWidget {
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: [
-                  VailColors.rose.withOpacity(0.12),
-                  VailColors.rose.withOpacity(0.06),
+                  VailColors.rose.withOpacity(isSender ? 0.07 : 0.12),
+                  VailColors.rose.withOpacity(isSender ? 0.03 : 0.06),
                 ],
               ),
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: VailColors.rose.withOpacity(0.3)),
+              border: Border.all(
+                color: VailColors.rose.withOpacity(isSender ? 0.20 : 0.30),
+              ),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(
-                  Icons.favorite_rounded,
+                Icon(
+                  isSender
+                      ? Icons.favorite_rounded
+                      : Icons.favorite_border_rounded,
                   color: VailColors.rose,
                   size: 28,
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  '✨ Someone sent you a spark!',
+                  isSender
+                      ? '✨ Your spark was sent!'
+                      : '💘 You\'ve received a spark!',
                   style: GoogleFonts.inter(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
@@ -473,7 +540,9 @@ class _MessageBubble extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Tap to send yours back',
+                  isSender
+                      ? 'Waiting to see if they feel it too…'
+                      : 'Tap to send yours back if you feel the same',
                   style: GoogleFonts.inter(
                     fontSize: 12,
                     color: VailColors.rose,
@@ -487,7 +556,171 @@ class _MessageBubble extends StatelessWidget {
       );
     }
 
-    // Plain system message (e.g. conversation start events).
+    // ── Unspark notification pill ───────────────────────────────────────────
+    if (message.isSystem && message.isUnspark) {
+      return Center(
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            color: VailColors.inkLight.withOpacity(0.07),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: VailColors.inkLight.withOpacity(0.15)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.heart_broken_rounded,
+                size: 14,
+                color: VailColors.inkLight.withOpacity(0.6),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'The spark was withdrawn',
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  color: VailColors.inkLight.withOpacity(0.7),
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // ── Date proposal card ──────────────────────────────────────────────────
+    if (message.isSystem && message.isDateProposal) {
+      final proposalId = message.dateProposalId;
+      return Center(
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                const Color(0xFF9B59B6).withOpacity(0.12),
+                const Color(0xFF9B59B6).withOpacity(0.05),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: const Color(0xFF9B59B6).withOpacity(0.30),
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF9B59B6).withOpacity(0.15),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.calendar_today_rounded,
+                        color: Color(0xFF9B59B6),
+                        size: 18,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '📅 Blind date proposed!',
+                            style: GoogleFonts.inter(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: VailColors.ink,
+                            ),
+                          ),
+                          if (message.dateDetails != null)
+                            Text(
+                              message.dateDetails!,
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                color: VailColors.inkLight,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Divider(height: 1, color: Color(0x1A9B59B6)),
+              // Action buttons — only shown when there's a proposal ID to act on.
+              if (proposalId != null)
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => context.go('/date/$conversationId'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFF9B59B6),
+                            side: const BorderSide(color: Color(0xFF9B59B6)),
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: Text(
+                            'Counter',
+                            style: GoogleFonts.inter(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () async {
+                            await DateService.instance.accept(proposalId);
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF9B59B6),
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            elevation: 0,
+                          ),
+                          child: Text(
+                            'Accept ✓',
+                            style: GoogleFonts.inter(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                const SizedBox(height: 12),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // ── Plain system message ────────────────────────────────────────────────
     if (message.isSystem) {
       return Center(
         child: Container(
@@ -642,7 +875,102 @@ class _InputBar extends StatelessWidget {
   }
 }
 
-// ─── Chemistry bottom sheet ───────────────────────────────────────────────────
+// ─── Unspark bottom sheet ─────────────────────────────────────────────────────
+class _UnsparkSheet extends StatelessWidget {
+  const _UnsparkSheet({required this.onConfirm, required this.onCancel});
+  final VoidCallback onConfirm;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      padding: const EdgeInsets.fromLTRB(28, 16, 28, 40),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // drag handle
+          Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: VailColors.ink.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(height: 28),
+          Container(
+            width: 72,
+            height: 72,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: VailColors.inkLight.withOpacity(0.08),
+            ),
+            child: Icon(
+              Icons.heart_broken_rounded,
+              color: VailColors.inkLight.withOpacity(0.7),
+              size: 36,
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            'Withdraw your spark?',
+            style: GoogleFonts.playfairDisplay(
+              fontSize: 24,
+              fontWeight: FontWeight.w700,
+              color: VailColors.ink,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            "Are you sure? This will reset the chemistry on both sides. You can always send a new spark later if you change your mind.",
+            textAlign: TextAlign.center,
+            style: GoogleFonts.inter(
+              fontSize: 14,
+              color: VailColors.inkLight,
+              height: 1.6,
+            ),
+          ),
+          const SizedBox(height: 28),
+          ElevatedButton(
+            onPressed: onCancel,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: VailColors.rose,
+              minimumSize: const Size(double.infinity, 52),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              elevation: 0,
+            ),
+            child: Text(
+              'Keep the spark 🔥',
+              style: GoogleFonts.inter(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextButton(
+            onPressed: onConfirm,
+            child: Text(
+              'Yes, withdraw it',
+              style: GoogleFonts.inter(
+                color: VailColors.inkLight.withOpacity(0.6),
+                fontSize: 14,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ChemistrySheet extends StatelessWidget {
   const _ChemistrySheet({required this.onConfirm, required this.onCancel});
   final VoidCallback onConfirm;

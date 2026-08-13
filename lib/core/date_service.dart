@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'conversation_service.dart';
 
 // ─── Models ───────────────────────────────────────────────────────────────────
 
@@ -34,11 +35,11 @@ class DateProposalDoc {
   bool get isAccepted => status == DateProposalStatus.accepted;
 
   String get dateTypeLabel => switch (dateType) {
-        DateType.coffee => 'Coffee',
-        DateType.dinner => 'Dinner',
-        DateType.walk => 'Walk',
-        DateType.activity => 'Activity',
-      };
+    DateType.coffee => 'Coffee',
+    DateType.dinner => 'Dinner',
+    DateType.walk => 'Walk',
+    DateType.activity => 'Activity',
+  };
 }
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -60,7 +61,7 @@ class DateService {
 
   // ── Create ────────────────────────────────────────────────────────────────
 
-  /// Writes a new date proposal.
+  /// Writes a new date proposal and sends an in-chat notification message.
   /// Returns the new document ID.
   Future<String> createProposal({
     required String conversationId,
@@ -81,6 +82,29 @@ class DateService {
       'status': 'pending',
       'createdAt': FieldValue.serverTimestamp(),
     });
+
+    // Build a human-readable summary for the in-chat notification card.
+    final typeLabel = switch (dateType) {
+      DateType.coffee => 'Coffee',
+      DateType.dinner => 'Dinner',
+      DateType.walk => 'Walk',
+      DateType.activity => 'Activity',
+    };
+    final dateDetails =
+        '$typeLabel · ${proposedDate.day}/${proposedDate.month}/${proposedDate.year} · $proposedTime';
+
+    // Fire-and-forget — a failure here shouldn't surface to the proposer.
+    try {
+      await ConversationService.instance.sendDateProposalNotification(
+        conversationId: conversationId,
+        participants: participants,
+        proposalId: doc.id,
+        dateDetails: dateDetails,
+      );
+    } catch (_) {
+      // Notification is best-effort; the proposal itself was saved.
+    }
+
     return doc.id;
   }
 
@@ -94,8 +118,7 @@ class DateService {
         .orderBy('createdAt', descending: true)
         .limit(1)
         .snapshots()
-        .map((snap) =>
-            snap.docs.isEmpty ? null : _fromSnap(snap.docs.first));
+        .map((snap) => snap.docs.isEmpty ? null : _fromSnap(snap.docs.first));
   }
 
   // ── Respond ───────────────────────────────────────────────────────────────
@@ -132,36 +155,35 @@ class DateService {
 
   // ── Serialisation ─────────────────────────────────────────────────────────
 
-  DateProposalDoc _fromSnap(
-      DocumentSnapshot<Map<String, dynamic>> snap) {
+  DateProposalDoc _fromSnap(DocumentSnapshot<Map<String, dynamic>> snap) {
     final d = snap.data()!;
     return DateProposalDoc(
       id: snap.id,
       conversationId: (d['conversationId'] as String?) ?? '',
       proposedBy: (d['proposedBy'] as String?) ?? '',
       participants: List<String>.from(
-          (d['participants'] as List<dynamic>?) ?? []),
+        (d['participants'] as List<dynamic>?) ?? [],
+      ),
       dateType: _parseDateType(d['dateType'] as String?),
       proposedDate:
           (d['proposedDate'] as Timestamp?)?.toDate() ?? DateTime.now(),
       proposedTime: (d['proposedTime'] as String?) ?? '',
       status: _parseStatus(d['status'] as String?),
-      createdAt:
-          (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      createdAt: (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );
   }
 
   DateType _parseDateType(String? s) => switch (s) {
-        'dinner' => DateType.dinner,
-        'walk' => DateType.walk,
-        'activity' => DateType.activity,
-        _ => DateType.coffee,
-      };
+    'dinner' => DateType.dinner,
+    'walk' => DateType.walk,
+    'activity' => DateType.activity,
+    _ => DateType.coffee,
+  };
 
   DateProposalStatus _parseStatus(String? s) => switch (s) {
-        'accepted' => DateProposalStatus.accepted,
-        'declined' => DateProposalStatus.declined,
-        'countered' => DateProposalStatus.countered,
-        _ => DateProposalStatus.pending,
-      };
+    'accepted' => DateProposalStatus.accepted,
+    'declined' => DateProposalStatus.declined,
+    'countered' => DateProposalStatus.countered,
+    _ => DateProposalStatus.pending,
+  };
 }

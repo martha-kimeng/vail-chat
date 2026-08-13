@@ -44,6 +44,10 @@ class MessageDoc {
     required this.sentAt,
     this.isSystem = false,
     this.isSparkNotification = false,
+    this.isUnspark = false,
+    this.isDateProposal = false,
+    this.dateProposalId,
+    this.dateDetails,
   });
 
   final String id;
@@ -52,9 +56,24 @@ class MessageDoc {
   final DateTime sentAt;
   final bool isSystem;
 
-  /// True when this system message is a spark notification — the UI renders
-  /// it as a tappable card instead of a plain italic pill.
+  /// True when this system message is a spark notification.
   final bool isSparkNotification;
+
+  /// True when this system message notifies the other user that a spark
+  /// was withdrawn.
+  final bool isUnspark;
+
+  /// True when this system message carries a date proposal card.
+  final bool isDateProposal;
+
+  /// The Firestore ID of the related [DateProposalDoc], set when
+  /// [isDateProposal] is true.
+  final String? dateProposalId;
+
+  /// Human-readable summary of the proposal (e.g. "Coffee · 12/08 · 19:00").
+  /// Pre-formatted by the sender so the receiver can read it without a
+  /// separate Firestore fetch.
+  final String? dateDetails;
 }
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -347,6 +366,109 @@ class ConversationService {
     await batch.commit();
   }
 
+  // ── Unspark ───────────────────────────────────────────────────────────────
+
+  /// Removes the current user's UID from [chemistrySignals] and resets
+  /// [mutualChemistry] to false.  Atomic via a Firestore transaction.
+  Future<void> unsignalChemistry(String conversationId) async {
+    final uid = _currentUid;
+
+    await _db.runTransaction((txn) async {
+      final snap = await txn.get(_conversations.doc(conversationId));
+      if (!snap.exists) return;
+
+      final data = snap.data()!;
+      final signals = List<String>.from(
+        (data['chemistrySignals'] as List<dynamic>?) ?? [],
+      );
+
+      signals.remove(uid);
+
+      txn.update(_conversations.doc(conversationId), {
+        'chemistrySignals': signals,
+        'mutualChemistry': false,
+      });
+    });
+  }
+
+  /// Writes a system message notifying the OTHER participant that the spark
+  /// was withdrawn.
+  Future<void> sendUnsparkNotification({
+    required String conversationId,
+    required List<String> participants,
+  }) async {
+    final uid = _currentUid;
+    final msgRef = _messages(conversationId).doc();
+    final convoRef = _conversations.doc(conversationId);
+
+    final unreadUpdate = <String, dynamic>{};
+    for (final p in participants) {
+      if (p != uid) {
+        unreadUpdate['unreadCount.$p'] = FieldValue.increment(1);
+      }
+    }
+
+    final batch = _db.batch();
+
+    batch.set(msgRef, {
+      'senderId': uid,
+      'text': '💔 The spark was withdrawn. You can keep chatting.',
+      'sentAt': FieldValue.serverTimestamp(),
+      'isSystem': true,
+      'isUnspark': true,
+    });
+
+    batch.update(convoRef, {
+      'lastMessage': '💔 The spark was withdrawn.',
+      'lastMessageAt': FieldValue.serverTimestamp(),
+      ...unreadUpdate,
+    });
+
+    await batch.commit();
+  }
+
+  // ── Date proposal notification ────────────────────────────────────────────
+
+  /// Writes a system message that acts as a date proposal card in the chat.
+  /// [dateDetails] is a pre-formatted summary string, e.g. "Coffee · 12/08 · 19:00".
+  Future<void> sendDateProposalNotification({
+    required String conversationId,
+    required List<String> participants,
+    required String proposalId,
+    required String dateDetails,
+  }) async {
+    final uid = _currentUid;
+    final msgRef = _messages(conversationId).doc();
+    final convoRef = _conversations.doc(conversationId);
+
+    final unreadUpdate = <String, dynamic>{};
+    for (final p in participants) {
+      if (p != uid) {
+        unreadUpdate['unreadCount.$p'] = FieldValue.increment(1);
+      }
+    }
+
+    final batch = _db.batch();
+
+    batch.set(msgRef, {
+      'senderId': uid,
+      'text': '📅 A blind date has been proposed! Tap to see the details.',
+      'sentAt': FieldValue.serverTimestamp(),
+      'isSystem': true,
+      'isDateProposal': true,
+      'dateProposalId': proposalId,
+      'dateDetails': dateDetails,
+    });
+
+    batch.update(convoRef, {
+      'lastMessage': '📅 A blind date has been proposed!',
+      'lastMessageAt': FieldValue.serverTimestamp(),
+      ...unreadUpdate,
+    });
+
+    await batch.commit();
+  }
+
   // ── Serialisation ─────────────────────────────────────────────────────────
 
   ConversationDoc _fromSnap(DocumentSnapshot<Map<String, dynamic>> snap) {
@@ -382,6 +504,10 @@ class ConversationService {
       sentAt: (d['sentAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       isSystem: (d['isSystem'] as bool?) ?? false,
       isSparkNotification: (d['isSparkNotification'] as bool?) ?? false,
+      isUnspark: (d['isUnspark'] as bool?) ?? false,
+      isDateProposal: (d['isDateProposal'] as bool?) ?? false,
+      dateProposalId: d['dateProposalId'] as String?,
+      dateDetails: d['dateDetails'] as String?,
     );
   }
 }
